@@ -14,10 +14,10 @@ pub mod common;
 
 #[test]
 fn mainnet_blocks_from_rpc() {
-    let rpc_url: Url = std::env::var("RPC_URL")
-        .unwrap_or("https://eth.llamarpc.com".to_string())
-        .parse()
-        .unwrap();
+    let rpc_url = match std::env::var("RPC_URL") {
+        Ok(value) if !value.is_empty() => value.parse().unwrap(),
+        _ => Url::parse("https://eth.llamarpc.com").unwrap(),
+    };
 
     // First block under 50 transactions of each EVM-spec-changing fork
     for block_number in [
