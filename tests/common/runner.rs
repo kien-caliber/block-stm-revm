@@ -1,5 +1,5 @@
 use alloy_consensus::{ReceiptEnvelope, TxType};
-use alloy_primitives::B256;
+use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, BlockTransactions, Header, Transaction};
 use pevm::{InMemoryStorage, PevmResult, PevmTxExecutionResult, Storage};
@@ -110,6 +110,8 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     block: Block,
     parent_header: Option<Header>,
     must_match_receipts_root: bool,
+    must_check_logs_bloom: bool,
+    must_check_gas_used: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let sequential_result = pevm::execute(
@@ -137,6 +139,26 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
         assert_eq!(
             block.header.receipts_root,
             calculate_receipt_root(build_receipt_envelopes(&block.transactions, &tx_results))
+        );
+    }
+
+    if must_check_logs_bloom {
+        let calculated_logs_bloom = tx_results
+            .iter()
+            .map(|tx| tx.receipt.bloom_slow())
+            .fold(Bloom::default(), |acc, bloom| acc.bit_or(bloom));
+        assert_eq!(block.header.logs_bloom, calculated_logs_bloom);
+    }
+
+    if must_check_gas_used {
+        assert_eq!(
+            block.header.gas_used,
+            tx_results
+                .iter()
+                .last()
+                .unwrap()
+                .receipt
+                .cumulative_gas_used
         );
     }
 }
