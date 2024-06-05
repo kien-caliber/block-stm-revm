@@ -1,5 +1,5 @@
 use alloy_consensus::{ReceiptEnvelope, TxType};
-use alloy_primitives::B256;
+use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Block, Header};
 use pevm::{InMemoryStorage, PevmResult, PevmTxExecutionResult, Storage};
@@ -113,6 +113,8 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     parent_header: Option<Header>,
     must_succeed: bool,
     must_check_receipts_root: bool,
+    must_check_logs_bloom: bool,
+    must_check_gas_used: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let sequential_result = pevm::execute(
@@ -130,6 +132,7 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
         false,
     );
     assert_execution_result(&sequential_result, &parallel_result, must_succeed);
+    let tx_results = sequential_result.unwrap();
 
     if must_check_receipts_root {
         if block.header.number.unwrap() < 4370000 { // before Byzantium
@@ -144,9 +147,29 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
             // and find the field `root`, that is the missing piece which
             // is needed to calculate the `receiptsRoot`.
         } else {
-            let receipt_envelopes = get_receipt_envelopes(&block, &sequential_result.unwrap());
+            let receipt_envelopes = get_receipt_envelopes(&block, &tx_results);
             let calculated_receipts_root = calculate_receipt_root(receipt_envelopes);
             assert_eq!(block.header.receipts_root, calculated_receipts_root);
         }
+    }
+
+    if must_check_logs_bloom {
+        let calculated_logs_bloom = tx_results
+            .iter()
+            .map(|tx| tx.receipt.bloom_slow())
+            .fold(Bloom::default(), |acc, bloom| acc.bit_or(bloom));
+        assert_eq!(block.header.logs_bloom, calculated_logs_bloom);
+    }
+
+    if must_check_gas_used {
+        assert_eq!(
+            block.header.gas_used,
+            tx_results
+                .iter()
+                .last()
+                .unwrap()
+                .receipt
+                .cumulative_gas_used
+        );
     }
 }
