@@ -32,8 +32,8 @@ pub struct RpcStorage {
     // Using a `Mutex` so we don't (yet) propagate mutability requirements
     // back to our `Storage` trait.
     // Not using `AHashMap` for ease of serialization.
-    // TODO: Cache & snapshot block hashes too!
     cache: Mutex<HashMap<Address, PlainAccount>>,
+    cache_block_hashes: Mutex<HashMap<U256, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
 }
@@ -45,6 +45,7 @@ impl RpcStorage {
             provider,
             block_id,
             cache: Mutex::new(HashMap::new()),
+            cache_block_hashes: Mutex::new(HashMap::new()),
             // TODO: Better error handling.
             runtime: Runtime::new().unwrap(),
         }
@@ -53,6 +54,11 @@ impl RpcStorage {
     /// Get a snapshot of the loaded state
     pub fn get_cache(&self) -> HashMap<Address, PlainAccount> {
         self.cache.lock().unwrap().clone()
+    }
+
+    /// Snapshot of block hashes
+    pub fn get_cache_block_hashes(&self) -> HashMap<U256, B256> {
+        self.cache_block_hashes.lock().unwrap().clone()
     }
 }
 
@@ -132,12 +138,25 @@ impl DatabaseRef for RpcStorage {
 
     // TODO: Proper error handling & testing.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        self.runtime
+        if let Some(&block_hash) = self.cache_block_hashes.lock().unwrap().get(&number) {
+            return Ok(block_hash);
+        }
+
+        let block_hash = self
+            .runtime
             .block_on(
                 self.provider
                     .get_block_by_number(BlockNumberOrTag::Number(number.to::<u64>()), false)
                     .into_future(),
             )
-            .map(|block| block.unwrap().header.hash.unwrap())
+            .map(|block| block.unwrap().header.hash.unwrap())?;
+
+        self.cache_block_hashes
+            .lock()
+            .unwrap()
+            .insert(number, block_hash);
+
+        println!("[{:?}] {:?}", number, block_hash);
+        Ok(block_hash)
     }
 }

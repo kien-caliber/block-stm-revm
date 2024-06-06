@@ -71,6 +71,8 @@ impl Storage for InMemoryStorage {
 
     // Currently unused.
     fn block_hash(&self, number: U256) -> Result<B256, Self::Error> {
+        println!("{:?}", number);
+        panic!();
         Ok(self
             .block_hashes
             .get(&number)
