@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/normalize.css@8.0.1/normalize.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css"
+    />
+    <title>PEVM Tester</title>
+  </head>
+  <body style="filter: hue-rotate(120deg)">
+    <header>
+      <nav>
+        <ul>
+          <li><a href="/">Home</a></li>
+          <li><a href="/blocks">Blocks</a></li>
+        </ul>
+      </nav>
+    </header>
+    <main>
+      <h1>List of blocks</h1>
+      <article>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Block number</th>
+              <th scope="col">Files</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% for (const blk of blocks) { %>
+            <tr>
+              <td
+                title="Updated at: <%= blk.updatedAt ? new Date(blk.updatedAt).toISOString() : '-' %>"
+              >
+                <% if (blk.status?.startsWith("ERROR")) { %>
+                <strong> <%= blk.blockNumber %> </strong>
+                <% } else { %> <%= blk.blockNumber %> <% } %>
+              </td>
+              <td>
+                <% for (const [k, v] of Object.entries(blk.files)) { %>
+                <a href="<%= '/'+v %>"><kbd><%= k.toUpperCase() %></kbd></a>
+                <% } %>
+              </td>
+              <td>
+                <% if (blk.status) { %><code><%= blk.status %></code><% } %>
+              </td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </article>
+    </main>
+  </body>
+</html>
