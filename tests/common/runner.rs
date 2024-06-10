@@ -1,3 +1,4 @@
+use super::diff::Diffable;
 use alloy_consensus::{ReceiptEnvelope, TxType};
 use alloy_primitives::{Bloom, B256};
 use alloy_provider::network::eip2718::Encodable2718;
@@ -22,10 +23,24 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
 }
 
 pub fn assert_execution_result<C: PevmChain + PartialEq>(
-    sequential_result: &PevmResult<C>,
-    parallel_result: &PevmResult<C>,
+    left: &PevmResult<C>,
+    right: &PevmResult<C>,
 ) {
-    assert_eq!(sequential_result, parallel_result);
+    let reasons = Diffable::diff("_".into(), left, right);
+    if !reasons.is_empty() {
+        panic!(
+            "{}\n{}",
+            "assertion `left == right` failed",
+            reasons
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    } else {
+        // defensive programming: just in case we implement Diffable::diff incorrectly
+        assert_eq!(left, right);
+    }
 }
 
 // Execute an REVM block sequentially & with PEVM and assert that
