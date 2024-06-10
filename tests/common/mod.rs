@@ -11,6 +11,7 @@ use pevm::{EvmAccount, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
+pub mod diff;
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;

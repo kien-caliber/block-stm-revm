@@ -1,10 +1,11 @@
 //! Run PEVM against a mainnet block and verify
-
-use alloy_chains::Chain;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use clap::Parser;
-use pevm::{network::ethereum, RpcStorage, StorageWrapper};
+use pevm::{
+    chain::{PevmChain, PevmEthereum},
+    RpcStorage, StorageWrapper,
+};
 use reqwest::Url;
 use revm::db::CacheDB;
 use std::error::Error;
@@ -37,11 +38,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         BlockTransactionsKind::Full,
     ))?;
     let block = block_maybe.ok_or(Box::<dyn Error>::from("cannot fetch block"))?;
-    let spec_id = ethereum::get_block_spec(&block.header).unwrap();
+    let chain = PevmEthereum::mainnet();
+    let spec_id = chain.get_block_spec(&block.header).unwrap();
     let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(args.block_number - 1));
     let wrapped_storage = StorageWrapper(&rpc_storage);
     let db = CacheDB::new(&wrapped_storage);
-    common::test_execute_alloy(&db, Chain::mainnet(), block.clone(), true);
+    common::test_execute_alloy(&db, &chain, block.clone(), true);
 
     Ok(())
 }
