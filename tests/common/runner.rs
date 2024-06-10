@@ -1,3 +1,4 @@
+use super::diff::Diffable;
 use alloy_primitives::Bloom;
 use alloy_rpc_types::Block;
 use pevm::{
@@ -19,6 +20,27 @@ pub fn mock_account(idx: usize) -> (Address, EvmAccount) {
         ..EvmAccount::default()
     };
     (address, account)
+}
+
+pub fn assert_execution_result<C: PevmChain + PartialEq>(
+    left: &pevm::PevmResult<C>,
+    right: &pevm::PevmResult<C>,
+) {
+    let reasons = Diffable::diff("_".into(), left, right);
+    if !reasons.is_empty() {
+        panic!(
+            "{}\n{}",
+            "assertion `left == right` failed",
+            reasons
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    } else {
+        // defensive programming: just in case we implement Diffable::diff incorrectly
+        assert_eq!(left, right);
+    }
 }
 
 // Execute an REVM block sequentially & with PEVM and assert that
@@ -59,7 +81,7 @@ pub fn test_execute_alloy<
     let mut pevm = Pevm::default();
     let sequential_result = pevm.execute(storage, chain, block.clone(), concurrency_level, true);
     let parallel_result = pevm.execute(storage, chain, block.clone(), concurrency_level, false);
-    assert_eq!(&sequential_result, &parallel_result);
+    assert_execution_result(&sequential_result, &parallel_result);
 
     let tx_results = sequential_result.unwrap();
     if must_match_block_header {
