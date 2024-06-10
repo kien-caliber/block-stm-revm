@@ -14,6 +14,7 @@ use pevm::{
 
 pub mod runner;
 pub use runner::{mock_account, test_execute_alloy, test_execute_revm};
+pub mod diff;
 pub mod storage;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
