@@ -1,7 +1,10 @@
 // TODO: Support custom chains like OP & RISE
 
+use alloy_primitives::{Bytes, B256, U128};
 use alloy_rpc_types::{BlockTransactions, Header};
-use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, TransactTo, TxEnv, U256};
+use revm::primitives::{
+    BlobExcessGasAndPrice, BlockEnv, OptimismFields, SpecId, TransactTo, TxEnv, U256,
+};
 
 /// Get the REVM spec id of an Alloy block.
 // Currently hardcoding Ethereum hardforks from these reference:
@@ -63,15 +66,15 @@ pub(crate) fn get_block_env(header: &Header) -> Option<BlockEnv> {
 // TODO: Better error handling & properly test this.
 pub(crate) fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>> {
     let mut tx_envs = Vec::with_capacity(transactions.len());
-    for tx in transactions.as_transactions()? {
+    for tx in transactions.txns() {
         tx_envs.push(TxEnv {
             caller: tx.from,
-            gas_limit: tx.gas.try_into().ok()?,
-            gas_price: U256::from(if tx.transaction_type? >= 2 {
-                tx.max_fee_per_gas?
-            } else {
-                tx.gas_price?
-            }),
+            gas_limit: tx.gas as u64,
+            gas_price: match tx.transaction_type.unwrap() {
+                126 => U256::ZERO,
+                2 => U256::from(tx.max_fee_per_gas.unwrap()),
+                _ => U256::from(tx.gas_price.unwrap()),
+            },
             gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
             transact_to: match tx.to {
                 Some(address) => TransactTo::Call(address),
@@ -99,6 +102,23 @@ pub(crate) fn get_tx_envs(transactions: &BlockTransactions) -> Option<Vec<TxEnv>
                 .collect(),
             blob_hashes: tx.blob_versioned_hashes.clone().unwrap_or_default(),
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+
+            #[cfg(feature = "optimism")]
+            optimism: OptimismFields {
+                source_hash: tx
+                    .other
+                    .get_deserialized::<B256>("sourceHash")
+                    .map(|result| result.unwrap()),
+                mint: tx
+                    .other
+                    .get_deserialized::<U128>("mint")
+                    .map(|result| result.unwrap().to()),
+                is_system_transaction: tx
+                    .other
+                    .get_deserialized("isSystemTx")
+                    .map(|result| result.unwrap()),
+                enveloped_tx: Some(Bytes::default()),
+            },
         })
     }
     Some(tx_envs)

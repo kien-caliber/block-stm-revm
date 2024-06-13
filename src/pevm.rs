@@ -430,12 +430,17 @@ fn post_process_beneficiary(
     beneficiary_account_info: &mut AccountInfo,
     value: MemoryValue,
 ) -> Account {
+    #[allow(unused_assignments)]
+    let mut touched = false;
+
     match value {
         MemoryValue::Basic(info) => {
             *beneficiary_account_info = *info;
+            touched = true;
         }
         MemoryValue::LazyBeneficiaryBalance(addition) => {
             beneficiary_account_info.balance += addition;
+            touched = !addition.is_zero();
         }
         _ => unreachable!(),
     }
@@ -443,7 +448,10 @@ fn post_process_beneficiary(
     // Does that happen and if so is it acceptable? A quick test with
     // REVM wipes it too!
     let mut beneficiary_account = Account::from(beneficiary_account_info.clone());
-    beneficiary_account.mark_touch();
+
+    if touched {
+        beneficiary_account.mark_touch();
+    }
     beneficiary_account
 }
 

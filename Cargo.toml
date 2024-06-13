@@ -3,6 +3,10 @@ name = "pevm"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+optimism = ["revm/optimism"]
+default = ["optimism"]
+
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
 # that need more security guarantees even for internally hashing
@@ -14,7 +18,7 @@ crossbeam = "0.8.4"
 dashmap = "5.5.3"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "16ae9d6bdce471bd008c20be9831eb9d1694d0bf", features = [
+revm = { git = "https://github.com/risechain/revm", rev = "a10994ac1f0a6f307c412003c5441d1f08a5f6f8", features = [
     "serde",
 ] }
 
@@ -34,7 +38,7 @@ alloy-trie = "0.4.1"
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "16ae9d6bdce471bd008c20be9831eb9d1694d0bf" }
+revme = { git = "https://github.com/risechain/revm", rev = "a10994ac1f0a6f307c412003c5441d1f08a5f6f8" }
 serde = "1.0.203"
 serde_json = "1.0.117"
 snmalloc-rs = "0.3.5"

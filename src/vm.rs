@@ -366,7 +366,7 @@ pub(crate) fn execute_tx<DB: Database>(
             db,
             Env::boxed(
                 // TODO: Should we turn off byte code analysis?
-                CfgEnv::default(),
+                CfgEnv::default().with_chain_id(10),
                 block_env.clone(),
                 tx,
             ),
@@ -374,6 +374,7 @@ pub(crate) fn execute_tx<DB: Database>(
         external: (),
     };
     // TODO: Support OP handlers
-    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+    // let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+    let handler = Handler::optimism_with_spec(spec_id, with_reward_beneficiary);
     Evm::new(context, handler).transact()
 }
