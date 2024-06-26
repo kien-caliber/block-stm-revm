@@ -7,7 +7,7 @@ use revm::{
     db::PlainAccount,
     interpreter::analysis::to_analysed,
     primitives::{Account, AccountInfo, Bytecode, JumpTable},
-    DatabaseRef,
+    Database, DatabaseRef,
 };
 
 /// An EVM account.
@@ -231,6 +231,38 @@ where
 
     fn block_hash(&self, number: &U256) -> Result<B256, Self::Error> {
         D::block_hash_ref(self, *number)
+    }
+}
+
+pub(crate) struct StorageRefToDatabaseWrapper<'a, S: Storage>(pub(crate) &'a S);
+
+impl<'a, S: Storage> Database for StorageRefToDatabaseWrapper<'a, S> {
+    type Error = S::Error;
+
+    fn basic(
+        &mut self,
+        address: Address,
+        _is_preload: bool,
+    ) -> Result<Option<AccountInfo>, Self::Error> {
+        S::basic(self.0, &address).map(|account| account.map(AccountBasic::into))
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        S::code_by_hash(&self.0, &code_hash)
+            .map(|code| code.map(Bytecode::from).unwrap_or_default())
+    }
+
+    fn has_storage(&mut self, address: Address) -> Result<bool, Self::Error> {
+        S::has_storage(&self.0, &address)
+    }
+
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        S::storage(&self.0, &address, &index)
+    }
+
+    #[doc = " Get block hash by block number."]
+    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
+        S::block_hash(&self.0, &number)
     }
 }
 

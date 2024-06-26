@@ -72,6 +72,10 @@ pub fn execute<S: Storage + Send + Sync>(
             .map_err(PevmError::InvalidTransaction)?,
         _ => return Err(PevmError::MissingTransactionData),
     };
+
+    for (index, tx) in tx_envs.iter().enumerate() {
+        println!("index={}, gas_price={:?}", index, tx.gas_price);
+    }
     // TODO: Continue to fine tune this condition.
     if force_sequential || tx_envs.len() < 4 || block.header.gas_used <= 650_000 {
         execute_revm_sequential(storage, chain, spec_id, block_env, tx_envs)

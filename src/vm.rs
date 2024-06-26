@@ -7,12 +7,13 @@ use revm::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
         ResultAndState, SpecId, TransactTo, TxEnv, B256, U256,
     },
-    Context, Database, Evm, EvmContext, Handler,
+    Context, Database, Evm, EvmContext, Handler, L1BlockInfo,
 };
 
 use crate::{
-    mv_memory::MvMemory, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue,
-    ReadError, ReadLocations, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
+    mv_memory::MvMemory, storage::StorageRefToDatabaseWrapper, EvmAccount, MemoryEntry,
+    MemoryLocation, MemoryLocationHash, MemoryValue, ReadError, ReadLocations, ReadOrigin, ReadSet,
+    Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -29,6 +30,12 @@ type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 // pre-calculated data to assist in reward calculations.
 enum RewardPolicy {
     Ethereum,
+    #[cfg(feature = "optimism")]
+    Optimism {
+        l1_block_info: L1BlockInfo,
+        l1_fee_recipient_location_hash: MemoryLocationHash,
+        base_fee_vault_location_hash: MemoryLocationHash,
+    },
 }
 
 /// Execution result of a transaction
@@ -379,6 +386,29 @@ impl<'a, S: Storage> Vm<'a, S> {
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
     ) -> Self {
+        let mut reward_policy = RewardPolicy::Ethereum;
+
+        #[cfg(feature = "optimism")]
+        if chain.is_optimism() {
+            let mut db = StorageRefToDatabaseWrapper(storage);
+            let l1_block_info = match L1BlockInfo::try_fetch(&mut db, spec_id) {
+                Ok(value) => value,
+                Err(error) => unreachable!("{:?}", error), // TODO: better error handing
+            };
+
+            let l1_fee_recipient_location_hash =
+                hasher.hash_one(MemoryLocation::Basic(revm::optimism::L1_FEE_RECIPIENT));
+
+            let base_fee_vault_location_hash =
+                hasher.hash_one(MemoryLocation::Basic(revm::optimism::BASE_FEE_RECIPIENT));
+
+            reward_policy = RewardPolicy::Optimism {
+                l1_block_info,
+                l1_fee_recipient_location_hash,
+                base_fee_vault_location_hash,
+            };
+        }
+
         Self {
             hasher,
             storage,
@@ -387,7 +417,7 @@ impl<'a, S: Storage> Vm<'a, S> {
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
             block_env,
-            reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
+            reward_policy,
             txs: DeferDrop::new(txs),
         }
     }
@@ -561,17 +591,45 @@ impl<'a, S: Storage> Vm<'a, S> {
 
     // Apply rewards (balance increments) to beneficiary accounts, etc.
     fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
-        let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
+        let base_fee = self.block_env.basefee;
+
+        let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
+            std::cmp::min(tx.gas_price, priority_fee + base_fee)
+        } else {
+            tx.gas_price
+        };
+        if self.spec_id.is_enabled_in(SpecId::LONDON) {
+            gas_price = gas_price.saturating_sub(base_fee);
+        }
+
+        let rewards: Vec<(MemoryLocationHash, U256)> = match &self.reward_policy {
             RewardPolicy::Ethereum => {
-                let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
-                    std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
-                } else {
-                    tx.gas_price
-                };
-                if self.spec_id.is_enabled_in(SpecId::LONDON) {
-                    gas_price = gas_price.saturating_sub(self.block_env.basefee);
-                }
                 vec![(self.beneficiary_location_hash, gas_price * gas_used)]
+            }
+            #[cfg(feature = "optimism")]
+            RewardPolicy::Optimism {
+                l1_block_info,
+                l1_fee_recipient_location_hash,
+                base_fee_vault_location_hash,
+            } => {
+                let is_deposit = tx.optimism.source_hash.is_some();
+                if is_deposit {
+                    Vec::new()
+                } else {
+                    let l1_cost = match &tx.optimism.enveloped_tx {
+                        Some(enveloped_tx) => {
+                            l1_block_info.calculate_tx_l1_cost(&enveloped_tx, self.spec_id)
+                        }
+                        // TODO: better error handling
+                        None => panic!("[OPTIMISM] Failed to load enveloped transaction."),
+                    };
+
+                    vec![
+                        (self.beneficiary_location_hash, gas_price * gas_used),
+                        (*l1_fee_recipient_location_hash, l1_cost),
+                        (*base_fee_vault_location_hash, base_fee * gas_used),
+                    ]
+                }
             }
         };
 
@@ -608,7 +666,17 @@ pub(crate) fn execute_tx<DB: Database>(
         ),
         external: (),
     };
-    // TODO: Support OP handlers
-    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+
+    let mut handler = None;
+    #[cfg(feature = "optimism")]
+    if chain.is_optimism() {
+        handler = Some(Handler::optimism_with_spec(
+            spec_id,
+            with_reward_beneficiary,
+        ));
+    }
+    let handler =
+        handler.unwrap_or_else(|| Handler::mainnet_with_spec(spec_id, with_reward_beneficiary));
+
     Evm::new(context, handler).transact()
 }

@@ -1,8 +1,11 @@
 // TODO: Support custom chains like OP & RISE
 // Ideally REVM & Alloy would provide all these.
 
+use alloy_primitives::{Bytes, B256, U128};
 use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::{BlobExcessGasAndPrice, BlockEnv, SpecId, TransactTo, TxEnv, U256};
+use revm::primitives::{
+    BlobExcessGasAndPrice, BlockEnv, OptimismFields, SpecId, TransactTo, TxEnv, U256,
+};
 
 /// Get the REVM spec id of an Alloy block.
 // Currently hardcoding Ethereum hardforks from these reference:
@@ -87,6 +90,11 @@ pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingErr
                 tx.max_fee_per_gas
                     .ok_or(TransactionParsingError::MissingMaxFeePerGas)?,
             ),
+            #[cfg(feature = "optimism")]
+            // NOTE: Ideally, we should assert if chain is optimism.
+            // However, the benefit (extra safety) does not justify the
+            // inconvenience due to the modification of function signature.
+            126 => U256::ZERO,
             unknown => return Err(TransactionParsingError::InvalidType(unknown)),
         },
         gas_priority_fee: tx.max_priority_fee_per_gas.map(U256::from),
@@ -115,5 +123,23 @@ pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingErr
             .collect(),
         blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
+
+        #[cfg(feature = "optimism")]
+        optimism: OptimismFields {
+            source_hash: tx
+                .other
+                .get_deserialized::<B256>("sourceHash")
+                .map(|result| result.unwrap()),
+            mint: tx
+                .other
+                .get_deserialized::<U128>("mint")
+                .map(|result| result.unwrap().to()),
+            is_system_transaction: tx
+                .other
+                .get_deserialized("isSystemTx")
+                .map(|result| result.unwrap()),
+            // TODO: get the correct value
+            enveloped_tx: Some(Bytes::default()),
+        },
     })
 }
