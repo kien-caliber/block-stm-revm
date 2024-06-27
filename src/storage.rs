@@ -237,30 +237,29 @@ where
 /// A Storage wrapper that implements REVM's [DatabaseRef], mainly used to
 /// provide data for REVM's [CachedDB] for sequential fallback or via RPC.
 #[derive(Debug)]
-pub struct StorageWrapper<S: Storage>(pub S);
+pub struct StorageWrapper<'a, S: Storage>(pub &'a S);
 
-impl<S: Storage> DatabaseRef for StorageWrapper<S> {
+impl<'a, S: Storage> DatabaseRef for StorageWrapper<'a, S> {
     type Error = S::Error;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        S::basic(&self.0, &address).map(|account| account.map(AccountBasic::into))
+        S::basic(self.0, &address).map(|account| account.map(AccountBasic::into))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        S::code_by_hash(&self.0, &code_hash)
-            .map(|code| code.map(Bytecode::from).unwrap_or_default())
+        S::code_by_hash(self.0, &code_hash).map(|code| code.map(Bytecode::from).unwrap_or_default())
     }
 
     fn has_storage_ref(&self, address: Address) -> Result<bool, Self::Error> {
-        S::has_storage(&self.0, &address)
+        S::has_storage(self.0, &address)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        S::storage(&self.0, &address, &index)
+        S::storage(self.0, &address, &index)
     }
 
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        S::block_hash(&self.0, &number)
+        S::block_hash(self.0, &number)
     }
 }
 
