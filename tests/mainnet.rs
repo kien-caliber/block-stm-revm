@@ -49,7 +49,7 @@ fn mainnet_blocks_from_rpc() {
             )
             .unwrap()
             .unwrap();
-        let spec_id = pevm::get_block_spec(&block.header).unwrap();
+        let spec_id = pevm::get_block_spec(Chain::mainnet(), &block.header).unwrap();
         let rpc_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number - 1));
         let wrapped_storage = StorageWrapper(&rpc_storage);
         let db = CacheDB::new(&wrapped_storage);
@@ -91,7 +91,7 @@ fn mainnet_blocks_from_disk() {
         // Run several times to try catching a race condition if there is any.
         // 1000~2000 is a better choice for local testing after major changes.
         for _ in 0..3 {
-            common::test_execute_alloy(storage.clone(), Chain::mainnet(), block.clone(), true)
+            common::test_execute_alloy(storage.clone(), Chain::mainnet(), block.clone(), true);
         }
     });
 }

@@ -77,6 +77,7 @@ enum MemoryValue {
     Storage(U256),
 }
 
+#[derive(Debug, Clone)]
 enum MemoryEntry {
     Data(TxIncarnation, MemoryValue),
     // When an incarnation is aborted due to a validation failure, the

@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    iter::once,
     num::NonZeroUsize,
     sync::{Mutex, OnceLock},
     thread,
@@ -23,7 +22,7 @@ use crate::{
     primitives::{get_block_env, get_block_spec, get_tx_env, TransactionParsingError},
     scheduler::Scheduler,
     storage::StorageWrapper,
-    vm::{execute_tx, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
+    vm::{execute_tx, ExecutionError, PevmTxExecutionResult, RewardPolicy, Vm, VmExecutionResult},
     AccountBasic, BuildAddressHasher, BuildIdentityHasher, EvmAccount, IncarnationStatus,
     MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TransactionsDependenciesNum,
     TransactionsDependents, TransactionsStatus, TxIdx, TxStatus, TxVersion,
@@ -60,7 +59,7 @@ pub fn execute<S: Storage + Send + Sync>(
     concurrency_level: NonZeroUsize,
     force_sequential: bool,
 ) -> PevmResult {
-    let Some(spec_id) = get_block_spec(&block.header) else {
+    let Some(spec_id) = get_block_spec(chain, &block.header) else {
         return Err(PevmError::UnknownBlockSpec);
     };
     let Some(block_env) = get_block_env(&block.header) else {
@@ -123,6 +122,18 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         beneficiary_location_hash,
         (0..block_size).collect::<Vec<TxIdx>>(),
     );
+
+    #[cfg(feature = "optimism")]
+    if chain.is_optimism() {
+        for (index, tx) in txs.iter().enumerate() {
+            if tx.optimism.source_hash.is_some() {
+                estimated_locations
+                    .entry(beneficiary_location_hash)
+                    .and_modify(|tx_indexes| tx_indexes.retain(|&idx| idx != index));
+            }
+        }
+    }
+
     let lazy_to_addresses: HashSet<Address, BuildAddressHasher> = txs
         .iter()
         .filter_map(|tx| {
@@ -200,12 +211,18 @@ pub fn execute_revm<S: Storage + Send + Sync>(
         fully_evaluated_results.push(execution_result);
     }
 
+    let rewarded_addresses = match vm.reward_policy() {
+        RewardPolicy::Ethereum => vec![beneficiary_address],
+        RewardPolicy::Optimism { .. } => vec![
+            beneficiary_address,
+            revm::optimism::L1_FEE_RECIPIENT,
+            revm::optimism::BASE_FEE_RECIPIENT,
+        ],
+    };
+
     // We fully evaluate (the balance and nonce of) the beneficiary account
     // and raw transfer recipients that may have been atomically updated.
-    for address in lazy_to_addresses
-        .into_iter()
-        .chain(once(beneficiary_address))
-    {
+    for address in lazy_to_addresses.into_iter().chain(rewarded_addresses) {
         let location_hash = hasher.hash_one(MemoryLocation::Basic(address));
         if let Some(write_history) = mv_memory.consume_location(&location_hash) {
             // TODO: We don't need to read from storage if the first entry is a fully evaluated account.

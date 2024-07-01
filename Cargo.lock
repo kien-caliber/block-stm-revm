@@ -2426,6 +2426,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "p256"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2",
+]
+
+[[package]]
 name = "parity-scale-codec"
 version = "3.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2639,6 +2651,15 @@ name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
+
+[[package]]
+name = "primeorder"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+dependencies = [
+ "elliptic-curve",
+]
 
 [[package]]
 name = "primitive-types"
@@ -2920,7 +2941,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "9.0.0"
-source = "git+https://github.com/risechain/revm?rev=979d069f0c2798f416c57f82ca1ebef46d257c4e#979d069f0c2798f416c57f82ca1ebef46d257c4e"
+source = "git+https://github.com/kien-rise/revm?rev=fdfd07b9c489bd167388b9c34ada8e3aa4e22b44#fdfd07b9c489bd167388b9c34ada8e3aa4e22b44"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -2937,7 +2958,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "5.0.0"
-source = "git+https://github.com/risechain/revm?rev=979d069f0c2798f416c57f82ca1ebef46d257c4e#979d069f0c2798f416c57f82ca1ebef46d257c4e"
+source = "git+https://github.com/kien-rise/revm?rev=fdfd07b9c489bd167388b9c34ada8e3aa4e22b44#fdfd07b9c489bd167388b9c34ada8e3aa4e22b44"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -2946,13 +2967,14 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "7.0.0"
-source = "git+https://github.com/risechain/revm?rev=979d069f0c2798f416c57f82ca1ebef46d257c4e#979d069f0c2798f416c57f82ca1ebef46d257c4e"
+source = "git+https://github.com/kien-rise/revm?rev=fdfd07b9c489bd167388b9c34ada8e3aa4e22b44#fdfd07b9c489bd167388b9c34ada8e3aa4e22b44"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
  "c-kzg",
  "k256",
  "once_cell",
+ "p256",
  "revm-primitives",
  "ripemd",
  "secp256k1",
@@ -2963,7 +2985,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "4.0.0"
-source = "git+https://github.com/risechain/revm?rev=979d069f0c2798f416c57f82ca1ebef46d257c4e#979d069f0c2798f416c57f82ca1ebef46d257c4e"
+source = "git+https://github.com/kien-rise/revm?rev=fdfd07b9c489bd167388b9c34ada8e3aa4e22b44#fdfd07b9c489bd167388b9c34ada8e3aa4e22b44"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
@@ -2983,7 +3005,7 @@ dependencies = [
 [[package]]
 name = "revme"
 version = "0.5.0"
-source = "git+https://github.com/risechain/revm?rev=979d069f0c2798f416c57f82ca1ebef46d257c4e#979d069f0c2798f416c57f82ca1ebef46d257c4e"
+source = "git+https://github.com/kien-rise/revm?rev=fdfd07b9c489bd167388b9c34ada8e3aa4e22b44#fdfd07b9c489bd167388b9c34ada8e3aa4e22b44"
 dependencies = [
  "alloy-rlp",
  "hash-db",

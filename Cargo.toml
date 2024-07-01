@@ -3,11 +3,17 @@ name = "pevm"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+optimism = ["revm/optimism"]
+default = ["optimism"]
+
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
 # that need more security guarantees even for internally hashing
 # EVM memory locations (we do not persist these hashes).
 ahash = { version = "0.8.11" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "a4bb5f0be3eec5c8679bdab93c1482df38ba8509" }
+alloy-rlp = "0.3.5"
 alloy-chains = { version = "0.1.22" }
 alloy-primitives = { version = "0.7.5", features = ["asm-keccak"] }
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "a4bb5f0be3eec5c8679bdab93c1482df38ba8509" }
@@ -17,7 +23,7 @@ dashmap = "6.0.0"
 defer-drop = "1.3.0"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "979d069f0c2798f416c57f82ca1ebef46d257c4e", features = [
+revm = { git = "https://github.com/kien-rise/revm", rev = "fdfd07b9c489bd167388b9c34ada8e3aa4e22b44", features = [
     "serde",
 ] }
 
@@ -31,13 +37,11 @@ reqwest = "0.12.4"
 tokio = { version = "1.38.0", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "a4bb5f0be3eec5c8679bdab93c1482df38ba8509" }
-alloy-rlp = "0.3.5"
 alloy-trie = "0.4.1"
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "979d069f0c2798f416c57f82ca1ebef46d257c4e" }
+revme = { git = "https://github.com/kien-rise/revm", rev = "fdfd07b9c489bd167388b9c34ada8e3aa4e22b44" }
 serde = "1.0.203"
 serde_json = "1.0.117"
 snmalloc-rs = "0.3.5"
