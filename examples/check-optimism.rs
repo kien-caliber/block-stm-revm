@@ -14,7 +14,7 @@ pub mod common;
 #[cfg(feature = "optimism")]
 fn main() {
     use alloy_chains::Chain;
-    use pevm::{Storage, StorageWrapper};
+    use pevm::{get_block_spec, Storage, StorageWrapper};
 
     let rpc_url = Url::parse("https://mainnet.optimism.io").unwrap();
     let block_number: u64 = 121252980;
@@ -24,7 +24,7 @@ fn main() {
         .block_on(provider.get_block(BlockId::number(block_number), BlockTransactionsKind::Full))
         .unwrap()
         .unwrap();
-    let spec_id = SpecId::ECOTONE;
+    let spec_id = get_block_spec(Chain::optimism_mainnet(), &block.header).unwrap();
     let pre_state_rpc_storage =
         RpcStorage::new(provider.clone(), spec_id, BlockId::number(block_number - 1));
     let pre_state_db = CacheDB::new(StorageWrapper(&pre_state_rpc_storage));

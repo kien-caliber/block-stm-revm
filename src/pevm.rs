@@ -127,6 +127,7 @@ pub fn execute_revm<S: Storage + Send + Sync>(
     if chain.is_optimism() {
         for (index, tx) in txs.iter().enumerate() {
             if tx.optimism.source_hash.is_some() {
+                // is_deposit
                 estimated_locations
                     .entry(beneficiary_location_hash)
                     .and_modify(|tx_indexes| tx_indexes.retain(|&idx| idx != index));

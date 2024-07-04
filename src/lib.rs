@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
+use alloy_primitives::Bytes;
+use alloy_rlp::Encodable;
 use revm::primitives::{AccountInfo, Address, U256};
 
 // We take the last 8 bytes of an address as its hash. This
@@ -77,7 +79,6 @@ enum MemoryValue {
     Storage(U256),
 }
 
-#[derive(Debug, Clone)]
 enum MemoryEntry {
     Data(TxIncarnation, MemoryValue),
     // When an incarnation is aborted due to a validation failure, the
@@ -197,6 +198,49 @@ type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 enum Task {
     Execution(TxVersion),
     Validation(TxVersion),
+}
+
+/// A builder for creating envelopes.
+/// NOTE: Consider to use `SmallVec`.
+#[derive(Debug)]
+pub struct EnvelopeBuilder {
+    items: Vec<Bytes>,
+}
+
+/// Builder for creating an envelope.
+impl EnvelopeBuilder {
+    /// Creates a new `EnvelopeBuilder` with the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            items: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Pushes a value onto the `EnvelopeBuilder`.
+    pub fn push<T: Encodable>(&mut self, value: &T) {
+        let mut buf: Vec<u8> = Vec::with_capacity(value.length());
+        value.encode(&mut buf);
+        self.items.push(Bytes::from(buf));
+    }
+
+    /// Converts the `EnvelopeBuilder` to bytes with an optional header byte.
+    pub fn to_bytes_with_header(&self, head: Option<u8>) -> Bytes {
+        let payload_length = self.items.iter().map(|item| item.len()).sum();
+        let header = alloy_rlp::Header {
+            list: true,
+            payload_length,
+        };
+        let mut buf =
+            Vec::<u8>::with_capacity((head.is_some() as usize) + header.length() + payload_length);
+        if let Some(byte) = head {
+            buf.push(byte);
+        };
+        header.encode(&mut buf);
+        for item in self.items.iter() {
+            buf.extend(item)
+        }
+        Bytes::from(buf)
+    }
 }
 
 // This optimization is desired as we constantly index into many

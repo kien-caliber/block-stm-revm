@@ -3,12 +3,14 @@
 
 use alloy_chains::Chain;
 use alloy_consensus::TxEnvelope;
-use alloy_primitives::{Bytes, B256, U128};
+use alloy_primitives::{Bytes, TxKind, B256, U128};
 use alloy_provider::network::eip2718::Encodable2718;
 use alloy_rpc_types::{Header, Transaction};
 use revm::primitives::{
     BlobExcessGasAndPrice, BlockEnv, OptimismFields, SpecId, TransactTo, TxEnv, U256,
 };
+
+use crate::EnvelopeBuilder;
 
 /// Get the REVM spec id of an Alloy block.
 // Currently hardcoding Ethereum hardforks from these reference:
@@ -18,8 +20,15 @@ use revm::primitives::{
 pub fn get_block_spec(chain: Chain, header: &Header) -> Option<SpecId> {
     #[cfg(feature = "optimism")]
     if chain.is_optimism() {
-        // TODO: complete this function
-        return Some(SpecId::ECOTONE);
+        return Some(if header.timestamp >= 1710374401 {
+            SpecId::ECOTONE
+        } else if header.timestamp >= 1704992401 {
+            SpecId::CANYON
+        } else if header.timestamp >= 105235063 {
+            SpecId::BEDROCK
+        } else {
+            SpecId::REGOLITH
+        });
     }
 
     Some(if header.timestamp >= 1710338135 {
@@ -80,15 +89,42 @@ pub enum TransactionParsingError {
     ConversionError(String),
 }
 
-/// Get the REVM tx envs of an Alloy block.
-// https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
-// https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
-// TODO: Properly test this.
-pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingError> {
-    let enveloped_tx = {
-        if tx.transaction_type.unwrap_or_default() == 126 {
-            // TODO: implement this
-            Bytes::new()
+#[cfg(feature = "optimism")]
+const DEPOSIT_TX_TYPE_ID: u8 = 126;
+
+fn get_optimism_fields(tx: &Transaction) -> Result<OptimismFields, TransactionParsingError> {
+    let source_hash = tx
+        .other
+        .get_deserialized::<B256>("sourceHash")
+        .transpose()
+        .map_err(|err| TransactionParsingError::ConversionError(err.to_string()))?;
+    let mint: Option<u128> = match tx.other.get_deserialized::<U128>("mint").transpose() {
+        Ok(opt) => opt.map(|value| value.to()),
+        Err(err) => return Err(TransactionParsingError::ConversionError(err.to_string())),
+    };
+    let is_system_transaction = tx
+        .other
+        .get_deserialized("isSystemTx")
+        .transpose()
+        .map_err(|err| TransactionParsingError::ConversionError(err.to_string()))?;
+
+    let envelope_buf = {
+        if tx.transaction_type.unwrap_or_default() == DEPOSIT_TX_TYPE_ID {
+            // https://github.com/paradigmxyz/reth/blob/3d3f52b2a4bf4fa0c8d94d44794a3f094cc76a5b/crates/primitives/src/transaction/optimism.rs#L110
+            let mut eb = EnvelopeBuilder::with_capacity(8);
+            eb.push(&source_hash.unwrap());
+            eb.push(&tx.from);
+            eb.push(&TxKind::from(tx.to));
+            if let Some(mint) = &mint {
+                eb.push(&mint);
+            } else {
+                eb.push(&[]);
+            }
+            eb.push(&tx.value);
+            eb.push(&(tx.gas as u64));
+            eb.push(&is_system_transaction.unwrap_or_default());
+            eb.push(&tx.input);
+            eb.to_bytes_with_header(Some(DEPOSIT_TX_TYPE_ID))
         } else {
             let tx_envelope = TxEnvelope::try_from(tx.clone())
                 .map_err(|error| TransactionParsingError::ConversionError(error.to_string()))?;
@@ -98,7 +134,23 @@ pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingErr
         }
     };
 
+    Ok(OptimismFields {
+        source_hash,
+        mint,
+        is_system_transaction,
+        enveloped_tx: Some(envelope_buf),
+    })
+}
+
+/// Get the REVM tx envs of an Alloy block.
+// https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/revm/env.rs#L234-L339
+// https://github.com/paradigmxyz/reth/blob/280aaaedc4699c14a5b6e88f25d929fe22642fa3/crates/primitives/src/alloy_compat.rs#L112-L233
+// TODO: Properly test this.
+pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingError> {
     Ok(TxEnv {
+        #[cfg(feature = "optimism")]
+        optimism: get_optimism_fields(&tx)?,
+
         caller: tx.from,
         gas_limit: tx
             .gas
@@ -146,22 +198,5 @@ pub(crate) fn get_tx_env(tx: Transaction) -> Result<TxEnv, TransactionParsingErr
             .collect(),
         blob_hashes: tx.blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas.map(U256::from),
-
-        #[cfg(feature = "optimism")]
-        optimism: OptimismFields {
-            source_hash: tx
-                .other
-                .get_deserialized::<B256>("sourceHash")
-                .map(|result| result.unwrap()),
-            mint: tx
-                .other
-                .get_deserialized::<U128>("mint")
-                .map(|result| result.unwrap().to()),
-            is_system_transaction: tx
-                .other
-                .get_deserialized("isSystemTx")
-                .map(|result| result.unwrap()),
-            enveloped_tx: Some(enveloped_tx),
-        },
     })
 }

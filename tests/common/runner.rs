@@ -1,8 +1,8 @@
 use alloy_chains::Chain;
-use alloy_primitives::{Bloom, B256};
-use alloy_rlp::Encodable;
+use alloy_primitives::{Bloom, Bytes, B256};
+use alloy_rpc_types::Receipt;
 use alloy_rpc_types::{Block, BlockTransactions, Transaction};
-use pevm::{EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
+use pevm::{EnvelopeBuilder, EvmAccount, PevmResult, PevmTxExecutionResult, Storage};
 use revm::primitives::{alloy_primitives::U160, Address, BlockEnv, SpecId, TxEnv, U256};
 use std::{collections::BTreeMap, num::NonZeroUsize, thread};
 
@@ -45,6 +45,28 @@ pub fn test_execute_revm<S: Storage + Clone + Send + Sync>(storage: S, txs: Vec<
     );
 }
 
+#[cfg(feature = "optimism")]
+const DEPOSIT_TX_TYPE_ID: u8 = 126;
+
+fn encode_receipt_2718(
+    chain: Chain,
+    tx_type: u8,
+    receipt: Receipt,
+    deposit_nonce: Option<u64>,
+) -> Bytes {
+    let mut eb = EnvelopeBuilder::with_capacity(6);
+    eb.push(&receipt.status);
+    eb.push(&receipt.cumulative_gas_used);
+    eb.push(&receipt.bloom_slow());
+    eb.push(&receipt.logs);
+    #[cfg(feature = "optimism")]
+    if chain.is_optimism() && tx_type == DEPOSIT_TX_TYPE_ID {
+        eb.push(&deposit_nonce.expect("deposit_nonce not provided"));
+        eb.push(&1u64); // deposit_receipt_version
+    }
+    eb.to_bytes_with_header(if tx_type == 0 { None } else { Some(tx_type) })
+}
+
 // Refer to section 4.3.2. Holistic Validity in the Ethereum Yellow Paper.
 // https://specs.optimism.io/protocol/deposits.html#deposit-receipt
 // https://github.com/ethereum/go-ethereum/blob/master/cmd/era/main.go#L289
@@ -60,32 +82,16 @@ fn calculate_receipt_root(
         .map(|(index, (tx, result))| {
             let tx_type = tx.transaction_type.unwrap_or_default();
 
-            let mut buf = Vec::new();
-            result.receipt.status.encode(&mut buf);
-            result.receipt.cumulative_gas_used.encode(&mut buf);
-            result.receipt.bloom_slow().encode(&mut buf);
-            result.receipt.logs.encode(&mut buf);
-
-            if chain.is_optimism() && tx_type == 126 {
+            let mut deposit_nonce = None;
+            #[cfg(feature = "optimism")]
+            if chain.is_optimism() && tx_type == DEPOSIT_TX_TYPE_ID {
                 let account_maybe = result.state.get(&tx.from).expect("Sender not found");
                 let account = account_maybe.as_ref().expect("Sender not changed");
-                let deposit_nonce = account.basic.nonce - 1;
-                deposit_nonce.encode(&mut buf);
-                let deposit_receipt_version: u64 = 1;
-                deposit_receipt_version.encode(&mut buf);
+                deposit_nonce = Some(account.basic.nonce - 1);
             }
 
-            let mut value_buffer = Vec::new();
-            if tx_type != 0 {
-                tx_type.encode(&mut value_buffer);
-            };
-            let rlp_head = alloy_rlp::Header {
-                list: true,
-                payload_length: buf.len(),
-            };
-            rlp_head.encode(&mut value_buffer);
-            value_buffer.append(&mut buf);
-
+            let value_buffer =
+                encode_receipt_2718(chain, tx_type, result.receipt.clone(), deposit_nonce);
             let key_buffer = alloy_rlp::encode_fixed_size(&index);
             let key_nibbles = alloy_trie::Nibbles::unpack(key_buffer);
             (key_nibbles, value_buffer)
@@ -120,10 +126,6 @@ pub fn test_execute_alloy<S: Storage + Clone + Send + Sync>(
     let tx_results = sequential_result.unwrap();
 
     if must_match_block_header {
-        for (index, tx_result) in tx_results.iter().enumerate() {
-            println!("{:02}: {:?}", index, tx_result.receipt);
-        }
-
         // We can only calculate the receipts root from Byzantium.
         // Before EIP-658 (https://eips.ethereum.org/EIPS/eip-658), the
         // receipt root is calculated with the post transaction state root,
