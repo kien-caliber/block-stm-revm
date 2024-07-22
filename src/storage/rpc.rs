@@ -73,6 +73,24 @@ impl<N> RpcStorage<N> {
     pub fn get_cache_block_hashes(&self) -> BlockHashes {
         self.cache_block_hashes.lock().unwrap().clone()
     }
+
+    /// Update the cache of accounts
+    pub fn update_cache_accounts(
+        &self,
+        changes: impl IntoIterator<Item = (Address, Option<EvmAccount>)>,
+    ) {
+        let mut mutex = self.cache_accounts.lock().unwrap();
+        for (address, change) in changes {
+            let target_account = mutex.entry(address).or_default();
+            if let Some(account) = change {
+                target_account.balance = account.balance;
+                target_account.nonce = account.nonce;
+                target_account.storage.extend(account.storage);
+            } else {
+                *target_account = EvmAccount::default();
+            }
+        }
+    }
 }
 
 impl<N: Network> Storage for RpcStorage<N> {
