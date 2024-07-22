@@ -3,6 +3,10 @@ name = "pevm"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+optimism = ["revm/optimism"]
+default = ["optimism"]
+
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
 # that need more security guarantees even for internally hashing
@@ -18,11 +22,14 @@ alloy-trie = "0.5.1"
 bitflags = "2.6.0"
 bitvec = "1.0.1"
 dashmap = "6.0.1"
+op-alloy-consensus = "0.2.7"
+op-alloy-network = "0.2.7"
+op-alloy-rpc-types = "0.2.7"
 serde = "1.0.209"
 smallvec = "1.13.2"
 
 # Let's do our best to port needed REVM changes upstream
-revm = { git = "https://github.com/risechain/revm", rev = "eb232edf0403ebb33847782fda7a14aaf4f86ab2", features = [
+revm = { git = "https://github.com/risechain/revm", rev = "2b97d7e8bd3c32268857a6cd9961a72d96344583", features = [
     "serde",
 ] }
 
@@ -37,10 +44,11 @@ tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 bincode = "1.3.3"
+clap = { version = "4.5.13", features = ["derive", "env"] }
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"
-revme = { git = "https://github.com/risechain/revm", rev = "eb232edf0403ebb33847782fda7a14aaf4f86ab2" }
+revme = { git = "https://github.com/risechain/revm", rev = "2b97d7e8bd3c32268857a6cd9961a72d96344583" }
 rpmalloc = { version = "0.2.2", features = ["thread_cache", "global_cache"] }
 snmalloc-rs = "0.3.6"
 serde_json = "1.0.127"

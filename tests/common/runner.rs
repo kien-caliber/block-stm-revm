@@ -52,7 +52,7 @@ pub fn test_execute_alloy<
 >(
     storage: &S,
     chain: &C,
-    block: Block,
+    block: Block<C::Transaction>,
     must_match_block_header: bool,
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
