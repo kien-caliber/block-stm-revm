@@ -6,10 +6,14 @@ use alloy_chains::NamedChain;
 use alloy_consensus::TxType;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::{BlockEnv, SpecId, TxEnv};
+use revm::{
+    primitives::{BlockEnv, SpecId, TxEnv},
+    Handler,
+};
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
+    vm::RewardPolicy,
     BuildIdentityHasher, MemoryLocation, TxIdx,
 };
 
@@ -141,5 +145,17 @@ impl PevmChain for PevmEthereum {
         lazy_addresses.0.insert(block_env.coinbase);
 
         MvMemory::new(block_size, estimated_locations, lazy_addresses)
+    }
+
+    fn get_reward_policy(&self, _hasher: &ahash::RandomState) -> RewardPolicy {
+        RewardPolicy::Ethereum
+    }
+
+    fn get_handler<'a, EXT, DB: revm::Database>(
+        &self,
+        spec_id: SpecId,
+        with_reward_beneficiary: bool,
+    ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB> {
+        Handler::mainnet_with_spec(spec_id, with_reward_beneficiary)
     }
 }

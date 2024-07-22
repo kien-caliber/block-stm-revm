@@ -4,10 +4,14 @@ use std::{collections::HashMap, fmt::Debug};
 
 use alloy_primitives::U256;
 use alloy_rpc_types::{Header, Transaction};
-use revm::primitives::{BlockEnv, SpecId, TxEnv};
+use revm::{
+    primitives::{BlockEnv, SpecId, TxEnv},
+    Handler,
+};
 
 use crate::{
     mv_memory::{LazyAddresses, MvMemory},
+    vm::RewardPolicy,
     BuildIdentityHasher,
 };
 
@@ -41,7 +45,22 @@ pub trait PevmChain: Debug {
             LazyAddresses::default(),
         )
     }
+
+    /// Get [RewardPolicy]
+    fn get_reward_policy(&self, hasher: &ahash::RandomState) -> RewardPolicy;
+
+    /// Get [Handler]
+    fn get_handler<'a, EXT, DB: revm::Database>(
+        &self,
+        spec_id: SpecId,
+        with_reward_beneficiary: bool,
+    ) -> Handler<'a, revm::Context<EXT, DB>, EXT, DB>;
 }
 
 mod ethereum;
 pub use ethereum::PevmEthereum;
+
+#[cfg(feature = "optimism")]
+pub(crate) mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::PevmOptimism;

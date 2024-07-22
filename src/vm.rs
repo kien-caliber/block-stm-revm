@@ -7,7 +7,7 @@ use revm::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
         ResultAndState, SpecId, TransactTo, TxEnv, B256, KECCAK_EMPTY, U256,
     },
-    Context, Database, Evm, EvmContext, Handler,
+    Context, Database, Evm, EvmContext,
 };
 use std::collections::HashMap;
 
@@ -29,8 +29,15 @@ type EvmStateTransitions = AHashMap<Address, Option<EvmAccount>>;
 // Different chains may have varying reward policies.
 // This enum specifies which policy to follow, with optional
 // pre-calculated data to assist in reward calculations.
-enum RewardPolicy {
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone)]
+pub enum RewardPolicy {
     Ethereum,
+    #[cfg(feature = "optimism")]
+    Optimism {
+        l1_fee_recipient_location_hash: MemoryLocationHash,
+        base_fee_vault_location_hash: MemoryLocationHash,
+    },
 }
 
 /// Execution result of a transaction
@@ -529,7 +536,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
             txs,
             spec_id,
             beneficiary_location_hash: hasher.hash_one(MemoryLocation::Basic(block_env.coinbase)),
-            reward_policy: RewardPolicy::Ethereum, // TODO: Derive from [chain]
+            reward_policy: chain.get_reward_policy(hasher),
             // TODO: Fine-tune the number of shards, like to the next number of two from the
             // number of worker threads.
             new_bytecodes: DeferDrop::new(DashMap::default()),
@@ -677,6 +684,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     &mut write_set,
                     tx,
                     U256::from(result_and_state.result.gas_used()),
+                    &evm.context.evm,
                 );
 
                 drop(evm); // release db
@@ -728,18 +736,52 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
     }
 
     // Apply rewards (balance increments) to beneficiary accounts, etc.
-    fn apply_rewards(&self, write_set: &mut WriteSet, tx: &TxEnv, gas_used: U256) {
-        let rewards: Vec<(MemoryLocationHash, U256)> = match self.reward_policy {
+    fn apply_rewards<DB: Database>(
+        &self,
+        write_set: &mut WriteSet,
+        tx: &TxEnv,
+        gas_used: U256,
+        evm_context: &EvmContext<DB>,
+    ) {
+        let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
+            std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
+        } else {
+            tx.gas_price
+        };
+        if self.spec_id.is_enabled_in(SpecId::LONDON) {
+            gas_price = gas_price.saturating_sub(self.block_env.basefee);
+        }
+
+        let rewards: Vec<(MemoryLocationHash, U256)> = match &self.reward_policy {
             RewardPolicy::Ethereum => {
-                let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
-                    std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)
-                } else {
-                    tx.gas_price
-                };
-                if self.spec_id.is_enabled_in(SpecId::LONDON) {
-                    gas_price = gas_price.saturating_sub(self.block_env.basefee);
-                }
                 vec![(self.beneficiary_location_hash, gas_price * gas_used)]
+            }
+            #[cfg(feature = "optimism")]
+            RewardPolicy::Optimism {
+                l1_fee_recipient_location_hash,
+                base_fee_vault_location_hash,
+            } => {
+                let is_deposit = tx.optimism.source_hash.is_some();
+                if is_deposit {
+                    Vec::new()
+                } else {
+                    let Some(enveloped_tx) = &tx.optimism.enveloped_tx else {
+                        panic!("[OPTIMISM] Failed to load enveloped transaction.");
+                    };
+                    let Some(l1_block_info) = &evm_context.l1_block_info else {
+                        panic!("[OPTIMISM] Missing l1_block_info.");
+                    };
+                    let l1_cost = l1_block_info.calculate_tx_l1_cost(enveloped_tx, self.spec_id);
+
+                    vec![
+                        (self.beneficiary_location_hash, gas_price * gas_used),
+                        (*l1_fee_recipient_location_hash, l1_cost),
+                        (
+                            *base_fee_vault_location_hash,
+                            self.block_env.basefee * gas_used,
+                        ),
+                    ]
+                }
             }
         };
 
@@ -782,7 +824,8 @@ pub(crate) fn build_evm<'a, DB: Database, C: PevmChain>(
         ),
         external: (),
     };
-    // TODO: Support OP handlers
-    let handler = Handler::mainnet_with_spec(spec_id, with_reward_beneficiary);
+
+    let handler = chain.get_handler(spec_id, with_reward_beneficiary);
+
     Evm::new(context, handler)
 }
