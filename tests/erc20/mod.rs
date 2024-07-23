@@ -5,7 +5,7 @@ use contract::ERC20Token;
 use pevm::EvmAccount;
 use revm::primitives::{uint, Address, TransactTo, TxEnv, U256};
 
-use crate::common::ChainState;
+use crate::common::{Bytecodes, ChainState};
 
 pub const GAS_LIMIT: u64 = 26_938;
 
@@ -20,7 +20,7 @@ pub fn generate_cluster(
     num_families: usize,
     num_people_per_family: usize,
     num_transfers_per_person: usize,
-) -> (ChainState, Vec<TxEnv>) {
+) -> (ChainState, Bytecodes, Vec<TxEnv>) {
     let families: Vec<Vec<Address>> = (0..num_families)
         .map(|_| generate_addresses(num_people_per_family))
         .collect();
@@ -29,9 +29,11 @@ pub fn generate_cluster(
 
     let gld_address = Address::new(rand::random());
 
-    let gld_account = ERC20Token::new("Gold Token", "GLD", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .build();
+    let (gld_account, gld_bytecodes) =
+        ERC20Token::new("Gold Token", "GLD", 18, 222_222_000_000_000_000_000_000u128)
+            .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
+            .build()
+            .into();
 
     let mut state = AHashMap::from([(gld_address, gld_account)]);
     let mut txs = Vec::new();
@@ -61,5 +63,5 @@ pub fn generate_cluster(
         }
     }
 
-    (state, txs)
+    (state, gld_bytecodes, txs)
 }

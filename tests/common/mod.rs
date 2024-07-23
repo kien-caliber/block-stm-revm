@@ -7,13 +7,15 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{AccountBasic, EvmAccount, EvmCode, InMemoryStorage};
 
 pub mod runner;
+use revm::primitives::Bytecode;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
 pub mod storage;
 
 pub type ChainState = AHashMap<Address, EvmAccount>;
+pub type Bytecodes = AHashMap<B256, EvmCode>;
 pub type BlockHashes = AHashMap<u64, B256>;
 
 pub static MOCK_ALLOY_BLOCK_HEADER: Header = Header {
@@ -64,6 +66,17 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         ))
         .unwrap();
 
+        let bytecodes: Bytecodes = accounts
+            .iter()
+            .filter_map(|(_, account)| {
+                if let (Some(code_hash), Some(code)) = (account.code_hash, account.code.clone()) {
+                    Some((code_hash, code))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         // Parse block hashes
         let block_hashes: BlockHashes =
             File::open(format!("blocks/{block_number}/block_hashes.json"))
@@ -75,6 +88,40 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                 })
                 .unwrap_or_default();
 
-        handler(block, InMemoryStorage::new(accounts, block_hashes));
+        handler(
+            block,
+            InMemoryStorage::new(accounts, bytecodes, block_hashes),
+        );
+    }
+}
+
+#[derive(Debug)]
+pub struct SyntheticContractAccount {
+    pub balance: U256,
+    pub nonce: u64,
+    pub code: Bytes,
+    pub storage: AHashMap<U256, U256>,
+}
+
+impl From<SyntheticContractAccount> for (EvmAccount, Bytecodes) {
+    fn from(account: SyntheticContractAccount) -> Self {
+        let bytecode = Bytecode::new_raw(account.code);
+        let code_hash = bytecode.hash_slow();
+        let evm_code = EvmCode::from(bytecode);
+
+        let evm_account = EvmAccount {
+            basic: AccountBasic {
+                balance: account.balance,
+                nonce: account.nonce,
+            },
+            code_hash: Some(code_hash),
+            code: Some(evm_code.clone()),
+            storage: account.storage,
+        };
+
+        let mut bytecodes = Bytecodes::new();
+        bytecodes.insert(code_hash, evm_code);
+
+        (evm_account, bytecodes)
     }
 }

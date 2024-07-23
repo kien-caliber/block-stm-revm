@@ -1,6 +1,9 @@
 pub mod contract;
 
-use crate::{common::ChainState, erc20::contract::ERC20Token};
+use crate::{
+    common::{Bytecodes, ChainState},
+    erc20::contract::ERC20Token,
+};
 use ahash::AHashMap;
 use contract::{SingleSwap, SwapRouter, UniswapV3Factory, UniswapV3Pool, WETH9};
 use pevm::EvmAccount;
@@ -11,7 +14,7 @@ pub const GAS_LIMIT: u64 = 155_934;
 pub fn generate_cluster(
     num_people: usize,
     num_swaps_per_person: usize,
-) -> (ChainState, Vec<TxEnv>) {
+) -> (ChainState, Bytecodes, Vec<TxEnv>) {
     // TODO: Better randomness control. Sometimes we want duplicates to test
     // dependent transactions, sometimes we want to guarantee non-duplicates
     // for independent benchmarks.
@@ -38,25 +41,29 @@ pub fn generate_cluster(
 
     let weth9_account = WETH9::new().build();
 
-    let dai_account = ERC20Token::new("DAI", "DAI", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .add_allowances(
-            &people_addresses,
-            single_swap_address,
-            uint!(1_000_000_000_000_000_000_U256),
-        )
-        .build();
+    let (dai_account, dai_bytecodes) =
+        ERC20Token::new("DAI", "DAI", 18, 222_222_000_000_000_000_000_000u128)
+            .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
+            .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
+            .add_allowances(
+                &people_addresses,
+                single_swap_address,
+                uint!(1_000_000_000_000_000_000_U256),
+            )
+            .build()
+            .into();
 
-    let usdc_account = ERC20Token::new("USDC", "USDC", 18, 222_222_000_000_000_000_000_000u128)
-        .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
-        .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
-        .add_allowances(
-            &people_addresses,
-            single_swap_address,
-            uint!(1_000_000_000_000_000_000_U256),
-        )
-        .build();
+    let (usdc_account, usdc_bytecodes) =
+        ERC20Token::new("USDC", "USDC", 18, 222_222_000_000_000_000_000_000u128)
+            .add_balances(&[pool_address], uint!(111_111_000_000_000_000_000_000_U256))
+            .add_balances(&people_addresses, uint!(1_000_000_000_000_000_000_U256))
+            .add_allowances(
+                &people_addresses,
+                single_swap_address,
+                uint!(1_000_000_000_000_000_000_U256),
+            )
+            .build()
+            .into();
 
     let factory_account = UniswapV3Factory::new(owner)
         .add_pool(dai_address, usdc_address, pool_address)
@@ -116,6 +123,10 @@ pub fn generate_cluster(
         state.insert(*person, account);
     }
 
+    let mut bytecodes = Bytecodes::new();
+    bytecodes.extend(dai_bytecodes);
+    bytecodes.extend(usdc_bytecodes);
+
     let mut txs = Vec::new();
 
     // sellToken0(uint256): c92b0891
@@ -162,5 +173,5 @@ pub fn generate_cluster(
         }
     }
 
-    (state, txs)
+    (state, bytecodes, txs)
 }

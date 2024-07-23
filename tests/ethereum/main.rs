@@ -9,6 +9,7 @@
 // - Help outline the minimal state commitment logic for PEVM.
 
 use ahash::AHashMap;
+use common::Bytecodes;
 use pevm::chain::PevmEthereum;
 use pevm::{AccountBasic, EvmAccount, InMemoryStorage, PevmError, PevmTxExecutionResult};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -107,8 +108,12 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             }
 
             let mut chain_state = AHashMap::new();
+            let mut bytecodes = Bytecodes::new();
             for (address, raw_info) in unit.pre.iter() {
                 let code = Bytecode::new_raw(raw_info.code.clone());
+                if !code.is_empty() {
+                    bytecodes.insert(code.hash_slow(), code.clone().into());
+                }
                 chain_state.insert(
                     *address,
                     EvmAccount {
@@ -126,7 +131,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 pevm::execute_revm_parallel(
-                    &InMemoryStorage::new(chain_state.clone(), []),
+                    &InMemoryStorage::new(chain_state.clone(),  bytecodes, []),
                     &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
