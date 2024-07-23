@@ -120,7 +120,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                             nonce: raw_info.nonce,
                         },
                         code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                        code: (!code.is_empty()).then(|| code.into()),
+                        // code: (!code.is_empty()).then(|| code.into()),
                         storage: raw_info.storage.clone().into_iter().collect(),
                     },
                 );
@@ -129,7 +129,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
             match (
                 test.expect_exception.as_deref(),
                 pevm::execute_revm_parallel(
-                    &InMemoryStorage::new(chain_state.clone(), []),
+                    &InMemoryStorage::new(chain_state.clone(), [], []),
                     &PevmEthereum::mainnet(),
                     spec_name.to_spec_id(),
                     build_block_env(&unit.env),
@@ -143,7 +143,7 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                     assert!(exec_results[0].receipt.status.coerce_status());
                     // This is overly strict as we only need the newly created account's code to be empty.
                     // Extracting such account is unjustified complexity so let's live with this for now.
-                    assert!(exec_results[0].state.values().all(|account| {
+                    assert!(exec_results[0].state.inner.values().all(|account| {
                         match account {
                             Some(account) => account.code_hash.is_none(),
                             None => true,
@@ -194,12 +194,12 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
 
                     // This is a good reference for a minimal state/DB commitment logic for
                     // PEVM/REVM to meet the Ethereum specs throughout the eras.
-                    for (address, account) in state {
+                    for (address, account) in state.inner {
                         if let Some(account) = account {
                             let chain_state_account = chain_state.entry(address).or_default();
                             chain_state_account.basic = account.basic;
                             chain_state_account.code_hash = account.code_hash;
-                            chain_state_account.code = account.code;
+                            // chain_state_account.code = account.code;
                             chain_state_account.storage.extend(account.storage.into_iter());
                         } else {
                             chain_state.remove(&address);
@@ -213,7 +213,8 @@ fn run_test_unit(path: &Path, unit: TestUnit) {
                                 balance: account.basic.balance,
                                 nonce: account.basic.nonce,
                                 code_hash: account.code_hash.unwrap_or(KECCAK_EMPTY),
-                                code: account.code.map(Bytecode::from),
+                                // code: account.code.map(Bytecode::from),
+                                code: Default::default() // TODO:
                             },
                             storage: account.storage.into_iter().collect(),
                         })}).collect::<Vec<_>>();

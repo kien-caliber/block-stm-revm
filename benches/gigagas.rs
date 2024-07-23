@@ -10,7 +10,7 @@ use ahash::AHashMap;
 use alloy_primitives::{Address, U160, U256};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{
-    execute_revm_parallel, execute_revm_sequential, chain::PevmEthereum, EvmAccount,
+    chain::PevmEthereum, execute_revm_parallel, execute_revm_sequential, EvmAccount,
     InMemoryStorage,
 };
 use revm::primitives::{BlockEnv, SpecId, TransactTo, TxEnv};
@@ -35,7 +35,7 @@ pub fn bench(c: &mut Criterion, name: &str, state: common::ChainState, txs: Vec<
     let chain = PevmEthereum::mainnet();
     let spec_id = SpecId::LATEST;
     let block_env = BlockEnv::default();
-    let storage = InMemoryStorage::new(state, []);
+    let storage = InMemoryStorage::new(state, [], []);
     let mut group = c.benchmark_group(name);
     group.bench_function("Sequential", |b| {
         b.iter(|| {

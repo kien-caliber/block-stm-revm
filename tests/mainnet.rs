@@ -71,7 +71,7 @@ fn mainnet_blocks_from_rpc() {
             // TODO: Snapshot with consistent ordering for ease of diffing.
             // Currently [EvmStorage]'s storage ordering isn't consistent.
             let accounts: BTreeMap<Address, EvmAccount> =
-                rpc_storage.get_cache_accounts().into_iter().collect();
+                rpc_storage.get_cache_accounts().inner.into_iter().collect();
             let file_state = File::create(format!("{dir}/pre_state.json")).unwrap();
             serde_json::to_writer(file_state, &accounts).unwrap();
 

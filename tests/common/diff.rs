@@ -1,6 +1,6 @@
 use alloy_consensus::{Eip658Value, Receipt};
 use alloy_primitives::{Address, Bytes, Log, LogData, B256, U256};
-use pevm::{AccountBasic, EvmAccount, EvmCode, PevmTxExecutionResult};
+use pevm::{AccountBasic, EvmAccount, EvmCode, PevmTxExecutionResult, WithCodeDict};
 use revm::primitives::{AccountInfo, AccountStatus, Bytecode, EvmStorageSlot};
 use std::{
     collections::BTreeSet,
@@ -182,6 +182,8 @@ macro_rules! impl_diffable_complex {
 impl_diffable_complex!(Log; address, data);
 impl_diffable_complex!(AccountInfo; balance, nonce, code_hash);
 impl_diffable_complex!(AccountBasic; balance, nonce);
-impl_diffable_complex!(EvmAccount; basic, storage, code_hash, code);
+impl_diffable_complex!(EvmAccount; basic, storage, code_hash);
 impl_diffable_complex!(Receipt; status, cumulative_gas_used, logs);
+impl_diffable_complex!(WithCodeDict<ahash::AHashMap<Address, Option<EvmAccount>>>; inner, codes);
+impl_diffable_complex!(WithCodeDict<EvmAccount>; inner, codes);
 impl_diffable_complex!(PevmTxExecutionResult; receipt, state);

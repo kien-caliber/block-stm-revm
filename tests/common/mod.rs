@@ -75,7 +75,11 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
                         .into()
                 })
                 .unwrap_or_default();
+        let bytecodes = AHashMap::new(); // TODO:
 
-        handler(block, InMemoryStorage::new(accounts, block_hashes));
+        handler(
+            block,
+            InMemoryStorage::new(accounts, block_hashes, bytecodes),
+        );
     }
 }

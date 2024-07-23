@@ -112,7 +112,11 @@ fn encode_receipt_2718(
         OpTxType::Eip1559 => OpReceiptEnvelope::Eip1559(tx_result.receipt.clone().with_bloom()),
         OpTxType::Eip4844 => OpReceiptEnvelope::Eip4844(tx_result.receipt.clone().with_bloom()),
         OpTxType::Deposit => {
-            let account_maybe = tx_result.state.get(&tx.from).expect("Sender not found");
+            let account_maybe = tx_result
+                .state
+                .inner
+                .get(&tx.from)
+                .expect("Sender not found");
             let account = account_maybe.as_ref().expect("Sender not changed");
             let receipt = OpDepositReceipt {
                 inner: tx_result.receipt.clone(),

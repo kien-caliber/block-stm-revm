@@ -12,9 +12,9 @@ use revm::{
 use std::collections::HashMap;
 
 use crate::{
-    chain::PevmChain, mv_memory::MvMemory, AccountBasic, BuildIdentityHasher, EvmAccount,
-    MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue, NewLazyAddresses, ReadError,
-    ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
+    chain::PevmChain, mv_memory::MvMemory, storage::WithCodeDict, AccountBasic,
+    BuildIdentityHasher, EvmAccount, MemoryEntry, MemoryLocation, MemoryLocationHash, MemoryValue,
+    NewLazyAddresses, ReadError, ReadOrigin, ReadSet, Storage, TxIdx, TxVersion, WriteSet,
 };
 
 /// The execution error from the underlying EVM executor.
@@ -47,7 +47,7 @@ pub struct PevmTxExecutionResult {
     // TODO: Consider promoting to [ReceiptEnvelope] if there is high demand
     pub receipt: Receipt,
     /// State that got updated
-    pub state: EvmStateTransitions,
+    pub state: WithCodeDict<EvmStateTransitions>,
 }
 
 impl PevmTxExecutionResult {
@@ -55,27 +55,28 @@ impl PevmTxExecutionResult {
     /// Note that [cumulative_gas_used] is preset to the gas used of this transaction.
     /// It should be post-processed with the remaining transactions in the block.
     pub fn from_revm(spec_id: SpecId, ResultAndState { result, state }: ResultAndState) -> Self {
-        Self {
-            receipt: Receipt {
-                status: result.is_success().into(),
-                cumulative_gas_used: result.gas_used() as u128,
-                logs: result.into_logs(),
-            },
-            state: state
-                .into_iter()
-                .filter(|(_, account)| account.is_touched())
-                .map(|(address, account)| {
-                    if account.is_selfdestructed()
-                    // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
-                    || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
-                    {
-                        (address, None)
-                    } else {
-                        (address, Some(EvmAccount::from(account)))
-                    }
-                })
-                .collect(),
+        let receipt = Receipt {
+            status: result.is_success().into(),
+            cumulative_gas_used: result.gas_used() as u128,
+            logs: result.into_logs(),
+        };
+        let mut result_state: WithCodeDict<EvmStateTransitions> = WithCodeDict::default();
+        for (address, account) in state {
+            if !account.is_touched() {
+                continue;
+            }
+            if account.is_selfdestructed() 
+             // https://github.com/ethereum/EIPs/blob/96523ef4d76ca440f73f0403ddb5c9cb3b24dcae/EIPS/eip-161.md
+            || account.is_empty() && spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON)
+            {
+                result_state.inner.insert(address, None);
+            } else {
+                let t: WithCodeDict<EvmAccount> = WithCodeDict::from(account);
+                result_state.inner.insert(address, Some(t.inner));
+                result_state.codes.extend(t.codes);
+            }
         }
+        Self{receipt, state: result_state}
     }
 }
 

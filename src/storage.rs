@@ -10,6 +10,12 @@ use revm::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WithCodeDict<T> {
+    pub inner: T,
+    pub codes: AHashMap<B256, EvmCode>,
+}
+
 /// An EVM account.
 // TODO: Flatten [AccountBasic] or more ideally, replace this with an Alloy type.
 // [AccountBasic] works for now as we're tightly tied to REVM types, hence
@@ -20,29 +26,33 @@ pub struct EvmAccount {
     pub basic: AccountBasic,
     /// The optional code hash of the account.
     pub code_hash: Option<B256>,
-    /// The account's optional code
-    // TODO: Box this to reduce [EvmAccount]'s stack size?
-    pub code: Option<EvmCode>,
+    // /// The account's optional code
+    // // TODO: Box this to reduce [EvmAccount]'s stack size?
+    // pub code: Option<EvmCode>,
     /// The account's storage.
     pub storage: AHashMap<U256, U256>,
 }
 
-impl From<Account> for EvmAccount {
+impl From<Account> for WithCodeDict<EvmAccount> {
     fn from(account: Account) -> Self {
         let has_code = !account.info.is_empty_code_hash();
-        Self {
+        let inner = EvmAccount {
             basic: AccountBasic {
                 balance: account.info.balance,
                 nonce: account.info.nonce,
             },
             code_hash: has_code.then_some(account.info.code_hash),
-            code: has_code.then(|| account.info.code.unwrap().into()),
             storage: account
                 .storage
                 .into_iter()
                 .map(|(k, v)| (k, v.present_value))
                 .collect(),
+        };
+        let mut codes = AHashMap::new();
+        if has_code {
+            codes.insert(account.info.code_hash, account.info.code.unwrap().into());
         }
+        WithCodeDict { inner, codes }
     }
 }
 

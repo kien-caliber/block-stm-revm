@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let observed_accounts = observed_storage.get_cache_accounts();
     let expected_storage = RpcStorage::new(provider, spec_id, BlockId::number(block_number));
 
-    for (address, account) in observed_accounts {
+    for (address, account) in observed_accounts.inner {
         let expected_basic = expected_storage
             .basic(&address)
             .unwrap()

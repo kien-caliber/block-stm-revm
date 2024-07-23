@@ -90,7 +90,7 @@ impl ERC20Token {
                 nonce: 1u64,
             },
             code_hash: Some(bytecode.hash_slow()),
-            code: Some(bytecode.into()),
+            // code: Some(bytecode.into()),
             storage: store.build(),
         }
     }

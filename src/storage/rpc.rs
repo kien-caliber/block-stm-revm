@@ -15,7 +15,7 @@ use tokio::runtime::Runtime;
 
 use crate::{AccountBasic, EvmAccount, Storage};
 
-use super::EvmCode;
+use super::{EvmCode, WithCodeDict};
 
 // TODO: Support generic network & transport types.
 // TODO: Put this behind an RPC flag to not pollute the core
@@ -34,7 +34,7 @@ pub struct RpcStorage<N> {
     // execution on the same block.
     // Using a [Mutex] so we don't propagate mutability requirements back
     // to our [Storage] trait and meet [Send]/[Sync] requirements for Pevm.
-    cache_accounts: Mutex<AHashMap<Address, EvmAccount>>,
+    cache_accounts: Mutex<WithCodeDict<AHashMap<Address, EvmAccount>>>,
     cache_block_hashes: Mutex<AHashMap<u64, B256>>,
     // TODO: Better async handling.
     runtime: Runtime,
@@ -55,7 +55,7 @@ impl<N> RpcStorage<N> {
     }
 
     /// Get a snapshot of accounts
-    pub fn get_cache_accounts(&self) -> AHashMap<Address, EvmAccount> {
+    pub fn get_cache_accounts(&self) -> WithCodeDict<AHashMap<Address, EvmAccount>> {
         self.cache_accounts.lock().unwrap().clone()
     }
 
@@ -65,10 +65,13 @@ impl<N> RpcStorage<N> {
     }
 
     /// Update the cache of accounts
-    pub fn update_cache_accounts(&self, changes: AHashMap<Address, Option<EvmAccount>>) {
+    pub fn update_cache_accounts(
+        &self,
+        changes: WithCodeDict<AHashMap<Address, Option<EvmAccount>>>,
+    ) {
         let mut mutex = self.cache_accounts.lock().unwrap();
-        for (address, change) in changes {
-            let target_account = mutex.entry(address).or_default();
+        for (address, change) in changes.inner {
+            let target_account = mutex.inner.entry(address).or_default();
             if let Some(account) = change {
                 target_account.basic = account.basic;
                 target_account.storage.extend(account.storage);
@@ -76,6 +79,7 @@ impl<N> RpcStorage<N> {
                 *target_account = EvmAccount::default();
             }
         }
+        mutex.codes.extend(changes.codes);
     }
 }
 
@@ -103,7 +107,7 @@ impl<N: Network> Storage for RpcStorage<N> {
     type Error = TransportError;
 
     fn basic(&self, address: &Address) -> Result<Option<AccountBasic>, Self::Error> {
-        if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
+        if let Some(account) = self.cache_accounts.lock().unwrap().inner.get(address) {
             return Ok(Some(account.basic.clone()));
         }
 
@@ -130,15 +134,20 @@ impl<N: Network> Storage for RpcStorage<N> {
         }
         let code = Bytecode::new_raw(code);
         let basic = AccountBasic { balance, nonce };
-        self.cache_accounts.lock().unwrap().insert(
+        let mut t = self.cache_accounts.lock().unwrap();
+        let code_hash = code.hash_slow();
+        t.inner.insert(
             *address,
             EvmAccount {
                 basic: basic.clone(),
-                code_hash: (!code.is_empty()).then(|| code.hash_slow()),
-                code: (!code.is_empty()).then(|| code.into()),
+                code_hash: (!code.is_empty()).then(|| code_hash),
+                // code: (!code.is_empty()).then(|| code.into()),
                 storage: AHashMap::default(),
             },
         );
+        if !code.is_empty() {
+            t.codes.insert(code_hash, code.into());
+        }
         Ok(Some(basic))
     }
 
@@ -148,22 +157,19 @@ impl<N: Network> Storage for RpcStorage<N> {
             .cache_accounts
             .lock()
             .unwrap()
+            .inner
             .get(address)
             .and_then(|account| account.code_hash))
     }
 
     fn code_by_hash(&self, code_hash: &B256) -> Result<Option<EvmCode>, Self::Error> {
-        // TODO: Cache bytecodes separately
-        for (_, account) in self.cache_accounts.lock().unwrap().iter() {
-            if account
-                .code_hash
-                .as_ref()
-                .is_some_and(|hash| hash == code_hash)
-            {
-                return Ok(account.code.clone());
-            }
-        }
-        Ok(None)
+        Ok(self
+            .cache_accounts
+            .lock()
+            .unwrap()
+            .codes
+            .get(code_hash)
+            .cloned())
     }
 
     fn has_storage(&self, _address: &Address) -> Result<bool, Self::Error> {
@@ -172,7 +178,7 @@ impl<N: Network> Storage for RpcStorage<N> {
     }
 
     fn storage(&self, address: &Address, index: &U256) -> Result<U256, Self::Error> {
-        if let Some(account) = self.cache_accounts.lock().unwrap().get(address) {
+        if let Some(account) = self.cache_accounts.lock().unwrap().inner.get(address) {
             if let Some(value) = account.storage.get(index) {
                 return Ok(*value);
             }
@@ -187,7 +193,7 @@ impl<N: Network> Storage for RpcStorage<N> {
         // that would make this account non-empty and may fail a tx that
         // deploys a contract here (EIP-7610).
         self.basic(address)?;
-        if let Some(account) = self.cache_accounts.lock().unwrap().get_mut(address) {
+        if let Some(account) = self.cache_accounts.lock().unwrap().inner.get_mut(address) {
             account.storage.insert(*index, value);
         }
 
