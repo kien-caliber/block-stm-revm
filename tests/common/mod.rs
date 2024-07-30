@@ -7,7 +7,7 @@ use std::{
 use ahash::AHashMap;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types::{Block, Header};
-use pevm::{EvmAccount, InMemoryStorage};
+use pevm::{EvmAccount, EvmCode, InMemoryStorage};
 
 pub mod runner;
 pub use runner::{assert_execution_result, mock_account, test_execute_alloy, test_execute_revm};
@@ -58,11 +58,23 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
         ))
         .unwrap();
 
+        // Parse bytecodes
+        let bytecodes: HashMap<B256, EvmCode> = serde_json::from_reader(BufReader::new(
+            File::open(format!("blocks/{block_number}/bytecodes.json")).unwrap(),
+        ))
+        .unwrap();
+
         // Parse state
-        let accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
+        let mut accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
             File::open(format!("blocks/{block_number}/pre_state.json")).unwrap(),
         ))
         .unwrap();
+
+        for (_address, account) in accounts.iter_mut() {
+            if let Some(code_hash) = account.code_hash {
+                account.code = bytecodes.get(&code_hash).cloned();
+            }
+        }
 
         // Parse block hashes
         let block_hashes: BlockHashes =
