@@ -17,6 +17,7 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // TODO: open with options to enable multiple tables
     let db = Database::<WriteMap>::open(&args.path)?;
 
     let tx = db.begin_rw_txn()?;
