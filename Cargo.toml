@@ -34,7 +34,10 @@ tokio = { version = "1.38.0", features = ["rt-multi-thread"] }
 [dev-dependencies]
 alloy-rlp = "0.3.7"
 alloy-trie = "0.4.1"
+anyhow = "1.0.86"
+clap = { version = "4.5.11", features = ["derive"] }
 criterion = "0.5.1"
+libmdbx = "0.5.0"
 rand = "0.8.5"
 rayon = "1.10.0"
 revme = { git = "https://github.com/risechain/revm", rev = "17117184e06603960692c313578cf0d0cf12fd3c" }
