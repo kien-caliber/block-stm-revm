@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use alloy_primitives::{Address, B256, U256};
+use libmdbx::{DatabaseOptions, Mode, PageSize, ReadWriteOptions, SyncMode};
 
 use super::{AccountBasic, EvmAccount, EvmCode, Storage};
 
@@ -13,7 +14,21 @@ pub struct OnDiskStorage {
 impl OnDiskStorage {
     /// Opens the on-disk storage at the specified path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, libmdbx::Error> {
-        let db = libmdbx::Database::open(&path)?;
+        let db = libmdbx::Database::open_with_options(
+            &path,
+            DatabaseOptions {
+                max_tables: Some(16),
+                mode: Mode::ReadWrite(ReadWriteOptions {
+                    sync_mode: SyncMode::Durable,
+                    min_size: Some(12288),
+                    max_size: Some(1073741824),
+                    growth_step: Some(8388608),
+                    shrink_threshold: Some(16777216),
+                }),
+                page_size: Some(PageSize::Set(4096)),
+                ..DatabaseOptions::default()
+            },
+        )?;
         Ok(Self { inner: db })
     }
 }

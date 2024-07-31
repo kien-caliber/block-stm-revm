@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use libmdbx::{Database, WriteFlags, WriteMap};
+use libmdbx::{Database, DatabaseOptions, TableFlags, WriteFlags, WriteMap};
 
 /// Command-line arguments.
 #[derive(Parser, Debug)]
@@ -18,15 +18,21 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     // TODO: open with options to enable multiple tables
-    let db = Database::<WriteMap>::open(&args.path)?;
+    let db = Database::<WriteMap>::open_with_options(
+        &args.path,
+        DatabaseOptions {
+            max_tables: Some(16),
+            ..DatabaseOptions::default()
+        },
+    )?;
 
     let tx = db.begin_rw_txn()?;
-    let table = tx.open_table(None)?;
+    let table = tx.create_table(Some("table1"), TableFlags::default())?;
     tx.put(&table, "key", "value", WriteFlags::default())?;
     tx.commit()?;
 
     let tx = db.begin_ro_txn()?;
-    let table = tx.open_table(None)?;
+    let table = tx.open_table(Some("table1"))?;
     let cursor = tx.cursor(&table)?;
     for item in cursor.into_iter() {
         println!("{:?}", item);
