@@ -8,8 +8,8 @@ use alloy_primitives::{Bytes, B256};
 use anyhow::Result;
 use clap::Parser;
 use libmdbx::{
-    Database, DatabaseOptions, Mode, NoWriteMap, PageSize, ReadWriteOptions, SyncMode, TableFlags,
-    WriteFlags,
+    Database, DatabaseKind, DatabaseOptions, Mode, NoWriteMap, ReadWriteOptions, SyncMode,
+    TableFlags, WriteFlags,
 };
 use pevm::EvmCode;
 use revm::primitives::Bytecode;
@@ -28,6 +28,29 @@ struct Args {
     output_dir: String,
 }
 
+const MB: isize = 1048576;
+
+fn open_db(dir: impl AsRef<Path>) -> Result<Database<NoWriteMap>> {
+    let db = Database::<NoWriteMap>::open_with_options(
+        dir.as_ref(),
+        DatabaseOptions {
+            max_tables: Some(16),
+            mode: Mode::ReadWrite(ReadWriteOptions {
+                // https://erthink.github.io/libmdbx/group__c__settings.html#ga79065e4f3c5fb2ad37a52b59224d583e
+                // https://github.com/erthink/libmdbx/issues/136#issuecomment-727490550
+                sync_mode: SyncMode::Durable,
+                min_size: Some(1 * MB), // The lower bound allows you to prevent database shrinking below certain reasonable size to avoid unnecessary resizing costs.
+                max_size: Some(1024 * MB), // The upper bound allows you to prevent database growth above certain reasonable size.
+                growth_step: Some(1 * MB), // The growth step must be greater than zero to allow the database to grow, but also reasonable not too small, since increasing the size by little steps will result a large overhead.
+                shrink_threshold: Some(4 * MB), // The shrink threshold must be greater than zero to allow the database to shrink but also reasonable not too small (to avoid extra overhead) and not less than growth step to avoid up-and-down flouncing.
+            }),
+            ..DatabaseOptions::default()
+        },
+    )?;
+
+    Ok(db)
+}
+
 fn create_all_tables(db: &Database<NoWriteMap>) -> Result<()> {
     let tx = db.begin_rw_txn()?;
     tx.create_table(Some("balance"), TableFlags::default())?;
@@ -39,14 +62,18 @@ fn create_all_tables(db: &Database<NoWriteMap>) -> Result<()> {
     Ok(())
 }
 
-fn put_all(db: &Database<NoWriteMap>, table_name: &str, entries: &[(Bytes, Bytes)]) -> Result<()> {
+fn put_all<E, K, V>(db: &Database<E>, table_name: &str, entries: &[(K, V)]) -> Result<()>
+where
+    E: DatabaseKind,
+    K: AsRef<[u8]>,
+    V: AsRef<[u8]>,
+{
+    let tx = db.begin_rw_txn()?;
+    let table = tx.open_table(Some(table_name))?;
     for (k, v) in entries {
-        let tx = db.begin_rw_txn()?;
-        let table = tx.open_table(Some(table_name))?;
-        println!("{:?} {:?}", k, v.0.len());
         tx.put(&table, k, v, WriteFlags::UPSERT)?;
-        tx.commit()?;
     }
+    tx.commit()?;
     Ok(())
 }
 
@@ -59,8 +86,7 @@ impl Data {
         let bytecodes: HashMap<B256, EvmCode> = {
             let path = PathBuf::from(path.as_ref()).join("bytecodes.json");
             let file = File::open(path)?;
-            let data = serde_json::from_reader(std::io::BufReader::new(file))?;
-            data
+            serde_json::from_reader(std::io::BufReader::new(file))?
         };
 
         Ok(Self { bytecodes })
@@ -85,23 +111,7 @@ impl Data {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-
-    let db = Database::<NoWriteMap>::open_with_options(
-        &args.output_dir,
-        DatabaseOptions {
-            max_tables: Some(16),
-            mode: Mode::ReadWrite(ReadWriteOptions {
-                sync_mode: SyncMode::Durable,
-                min_size: Some(12288),
-                max_size: Some(1073741824),
-                growth_step: Some(8388608),
-                shrink_threshold: Some(16777216),
-            }),
-            page_size: Some(PageSize::Set(4096)),
-            ..DatabaseOptions::default()
-        },
-    )?;
-
+    let db = open_db(args.output_dir)?;
     let data = Data::read_from(&args.input_dir)?;
     data.write_to(&db)?;
 

@@ -18,14 +18,6 @@ impl OnDiskStorage {
             &path,
             DatabaseOptions {
                 max_tables: Some(16),
-                mode: Mode::ReadWrite(ReadWriteOptions {
-                    sync_mode: SyncMode::Durable,
-                    min_size: Some(12288),
-                    max_size: Some(1073741824),
-                    growth_step: Some(8388608),
-                    shrink_threshold: Some(16777216),
-                }),
-                page_size: Some(PageSize::Set(4096)),
                 ..DatabaseOptions::default()
             },
         )?;
