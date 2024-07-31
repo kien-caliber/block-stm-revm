@@ -4,14 +4,14 @@
 
 //! For help, run: `cargo run --example to-mdbx -- --help`
 
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use anyhow::Result;
 use clap::Parser;
 use libmdbx::{
     Database, DatabaseKind, DatabaseOptions, Mode, NoWriteMap, ReadWriteOptions, SyncMode,
     TableFlags, WriteFlags,
 };
-use pevm::EvmCode;
+use pevm::{EvmAccount, EvmCode};
 use revm::primitives::Bytecode;
 use std::{
     collections::HashMap,
@@ -56,13 +56,17 @@ fn create_all_tables(db: &Database<NoWriteMap>) -> Result<()> {
     tx.create_table(Some("balance"), TableFlags::default())?;
     tx.create_table(Some("nonce"), TableFlags::default())?;
     tx.create_table(Some("code_hash"), TableFlags::default())?;
-    tx.create_table(Some("bytecodes"), TableFlags::default())?;
+    tx.create_table(Some("bytecode"), TableFlags::default())?;
     tx.create_table(Some("storage"), TableFlags::default())?;
     tx.commit()?;
     Ok(())
 }
 
-fn put_all<E, K, V>(db: &Database<E>, table_name: &str, entries: &[(K, V)]) -> Result<()>
+fn put_all<E, K, V>(
+    db: &Database<E>,
+    table_name: &str,
+    entries: impl Iterator<Item = (K, V)>,
+) -> Result<()>
 where
     E: DatabaseKind,
     K: AsRef<[u8]>,
@@ -78,33 +82,41 @@ where
 }
 
 struct Data {
-    bytecodes: HashMap<B256, EvmCode>,
+    balances: HashMap<Address, B256>,
+    codes: HashMap<B256, Bytes>,
 }
 
 impl Data {
     fn read_from(path: impl AsRef<Path>) -> Result<Self> {
+        let state: HashMap<Address, EvmAccount> = {
+            let path = PathBuf::from(path.as_ref()).join("pre_state.json");
+            let file = File::open(path)?;
+            serde_json::from_reader(std::io::BufReader::new(file))?
+        };
+
+        let balances: HashMap<Address, B256> = state
+            .iter()
+            .map(|(&address, account)| (address, B256::from(account.basic.balance)))
+            .collect();
+
         let bytecodes: HashMap<B256, EvmCode> = {
             let path = PathBuf::from(path.as_ref()).join("bytecodes.json");
             let file = File::open(path)?;
             serde_json::from_reader(std::io::BufReader::new(file))?
         };
 
-        Ok(Self { bytecodes })
+        let codes: HashMap<B256, Bytes> = bytecodes
+            .into_iter()
+            .map(|(code_hash, evm_code)| (code_hash, Bytecode::from(evm_code).bytes()))
+            .collect();
+
+        Ok(Self { balances, codes })
     }
 
     fn write_to(&self, db: &Database<NoWriteMap>) -> Result<()> {
         create_all_tables(db)?;
-        let bytecodes_entries: Vec<(Bytes, Bytes)> = self
-            .bytecodes
-            .iter()
-            .map(|(code_hash, evm_code)| {
-                (
-                    Bytes::from(code_hash.clone()),
-                    Bytecode::from(evm_code.clone()).bytes(),
-                )
-            })
-            .collect();
-        put_all(db, "bytecodes", &bytecodes_entries)?;
+        put_all(db, "bytecode", self.codes.iter())?;
+        put_all(db, "balance", self.balances.iter())?;
         Ok(())
     }
 }
