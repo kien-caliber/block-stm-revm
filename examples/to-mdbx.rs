@@ -4,7 +4,7 @@
 
 //! For help, run: `cargo run --example to-mdbx -- --help`
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, B64, U256};
 use anyhow::Result;
 use clap::Parser;
 use libmdbx::{
@@ -83,7 +83,10 @@ where
 
 struct Data {
     balances: HashMap<Address, B256>,
+    nonces: HashMap<Address, B64>,
+    code_hashes: HashMap<Address, B256>,
     codes: HashMap<B256, Bytes>,
+    storage: HashMap<(Address, U256), B256>,
 }
 
 impl Data {
@@ -99,6 +102,29 @@ impl Data {
             .map(|(&address, account)| (address, B256::from(account.basic.balance)))
             .collect();
 
+        let nonces: HashMap<Address, B64> = state
+            .iter()
+            .map(|(&address, account)| (address, B64::from(account.basic.nonce)))
+            .collect();
+
+        let code_hashes: HashMap<Address, B256> = state
+            .iter()
+            .filter_map(|(&address, account)| {
+                if let Some(code_hash) = account.code_hash {
+                    Some((address, code_hash))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut storage: HashMap<(Address, U256), B256> = HashMap::new();
+        for (address, account) in state {
+            for (key, value) in account.storage {
+                storage.insert((address, key), B256::from(value));
+            }
+        }
+
         let bytecodes: HashMap<B256, EvmCode> = {
             let path = PathBuf::from(path.as_ref()).join("bytecodes.json");
             let file = File::open(path)?;
@@ -110,13 +136,31 @@ impl Data {
             .map(|(code_hash, evm_code)| (code_hash, Bytecode::from(evm_code).bytes()))
             .collect();
 
-        Ok(Self { balances, codes })
+        Ok(Self {
+            balances,
+            nonces,
+            code_hashes,
+            codes,
+            storage,
+        })
     }
 
     fn write_to(&self, db: &Database<NoWriteMap>) -> Result<()> {
         create_all_tables(db)?;
         put_all(db, "bytecode", self.codes.iter())?;
         put_all(db, "balance", self.balances.iter())?;
+        put_all(db, "nonce", self.nonces.iter())?;
+        put_all(db, "code_hash", self.code_hashes.iter())?;
+        put_all(
+            db,
+            "storage",
+            self.storage.iter().map(|(&(address, key), value)| {
+                let composite_key = Bytes::copy_from_slice(
+                    &[address.as_slice(), B256::from(key).as_slice()].concat(),
+                );
+                (composite_key, value)
+            }),
+        )?;
         Ok(())
     }
 }
