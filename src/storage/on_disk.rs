@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use alloy_primitives::{Address, Bytes, FixedBytes, B256, B64, U256};
+use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256, B64, U256};
 use libmdbx::{DatabaseKind, DatabaseOptions, Mode, PageSize, ReadWriteOptions, SyncMode};
 use revm::primitives::Bytecode;
 
@@ -95,6 +95,6 @@ impl Storage for OnDiskStorage {
     }
 
     fn block_hash(&self, number: &u64) -> Result<B256, Self::Error> {
-        todo!()
+        Ok(keccak256(number.to_string().as_bytes())) // TODO:
     }
 }
