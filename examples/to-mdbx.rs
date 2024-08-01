@@ -4,7 +4,7 @@
 
 //! For help, run: `cargo run --example to-mdbx -- --help`
 
-use alloy_primitives::{Address, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, Bytes, FixedBytes, B256, B64};
 use anyhow::Result;
 use clap::Parser;
 use libmdbx::{
@@ -18,6 +18,8 @@ use std::{
     fs::File,
     path::{Path, PathBuf},
 };
+
+type B416 = FixedBytes<52>;
 
 #[derive(Parser, Debug)]
 #[clap(name = "to-mdbx")]
@@ -86,7 +88,7 @@ struct Data {
     nonces: HashMap<Address, B64>,
     code_hashes: HashMap<Address, B256>,
     codes: HashMap<B256, Bytes>,
-    storage: HashMap<(Address, U256), B256>,
+    storage: HashMap<B416, B256>,
 }
 
 impl Data {
@@ -118,10 +120,12 @@ impl Data {
             })
             .collect();
 
-        let mut storage: HashMap<(Address, U256), B256> = HashMap::new();
+        let mut storage: HashMap<B416, B256> = HashMap::new();
         for (address, account) in state {
             for (key, value) in account.storage {
-                storage.insert((address, key), B256::from(value));
+                let composite_key =
+                    B416::from_slice(&[address.as_slice(), B256::from(key).as_slice()].concat());
+                storage.insert(composite_key, B256::from(value));
             }
         }
 
@@ -151,16 +155,7 @@ impl Data {
         put_all(db, "balance", self.balances.iter())?;
         put_all(db, "nonce", self.nonces.iter())?;
         put_all(db, "code_hash", self.code_hashes.iter())?;
-        put_all(
-            db,
-            "storage",
-            self.storage.iter().map(|(&(address, key), value)| {
-                let composite_key = Bytes::copy_from_slice(
-                    &[address.as_slice(), B256::from(key).as_slice()].concat(),
-                );
-                (composite_key, value)
-            }),
-        )?;
+        put_all(db, "storage", self.storage.iter())?;
         Ok(())
     }
 }
