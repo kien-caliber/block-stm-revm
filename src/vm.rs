@@ -151,7 +151,7 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         if let Some(to) = to {
             db.to_code_hash = db.get_code_hash(*to)?;
 
-            db.lazy_strategy = if let Some(to_code_hash) = db.to_code_hash {
+            db.lazy_strategy = if let Some(_to_code_hash) = db.to_code_hash {
                 // // TODO: how to detect if a contract is ERC20?
                 // // TODO: check method ID
                 // if to_code_hash
@@ -710,7 +710,12 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                 match db.lazy_strategy {
                     LazyStrategy::None => {}
                     LazyStrategy::RawTransfer => {
-                        self.mv_memory.add_lazy_addresses([*from, *to.unwrap()])
+                        self.mv_memory
+                            .lazy_locations
+                            .insert(MemoryLocation::Basic(*from));
+                        self.mv_memory
+                            .lazy_locations
+                            .insert(MemoryLocation::Basic(*to.unwrap()));
                     } // LazyStrategy::ERC20Transfer => {
                       //     // TODO: this is incorrect
                       //     self.mv_memory.add_lazy_addresses([*to.unwrap()])
