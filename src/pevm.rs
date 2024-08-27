@@ -130,6 +130,8 @@ impl Pevm {
 
         let block_size = txs.len();
 
+        println!("372 = {:?}", txs[372].data);
+
         // Accumulated data to be defer-dropped once.
         // TODO: Provide more explicit garbage collecting configs for users.
         // For instance, to have a dedicated thread (pool) for cleanup.
@@ -220,6 +222,11 @@ impl Pevm {
             execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
             fully_evaluated_results.push(execution_result);
         }
+
+        println!(
+            "fully_evaluated_results[372] = {:?}",
+            fully_evaluated_results[372].state
+        );
 
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
@@ -326,6 +333,7 @@ impl Pevm {
                 }
                 MemoryLocation::CodeHash(_) => unreachable!(),
                 MemoryLocation::Storage(address, index) => {
+                    println!("MemoryLocation::Storage({:?}, {:?})", address, index);
                     let location_hash = self
                         .hasher
                         .hash_one(MemoryLocation::Storage(*address, *index));
@@ -334,8 +342,10 @@ impl Pevm {
                         if let Ok(value) = storage.storage(address, index) {
                             storage_value = value
                         }
+                        println!("storage_value={:?}", storage_value);
 
                         for (tx_idx, memory_entry) in write_history.iter() {
+                            println!("tx_idx={:?} memory_entry={:?}", tx_idx, memory_entry);
                             match memory_entry {
                                 MemoryEntry::Data(_, MemoryValue::Storage(value)) => {
                                     storage_value = *value;
@@ -343,11 +353,14 @@ impl Pevm {
                                 MemoryEntry::Data(_, MemoryValue::ERC20LazyRecipient(value)) => {
                                     storage_value += value;
                                 }
+                                MemoryEntry::Data(_, MemoryValue::ERC20Unchanged) => {}
                                 MemoryEntry::Data(_, MemoryValue::ERC20LazySender(value)) => {
                                     storage_value -= value;
                                 }
                                 _ => unreachable!(),
                             }
+
+                            println!("index={:?} storage_value={:?}", index, storage_value);
 
                             let tx_result =
                                 unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
@@ -362,6 +375,11 @@ impl Pevm {
                 }
             }
         }
+
+        println!(
+            "fully_evaluated_results[372] = {:?}",
+            fully_evaluated_results[372].state
+        );
 
         Ok(fully_evaluated_results)
     }

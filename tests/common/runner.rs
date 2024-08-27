@@ -28,6 +28,7 @@ pub fn assert_execution_result<C: PevmChain + PartialEq>(
 ) {
     let reasons = Diffable::diff("_".into(), left, right);
     if !reasons.is_empty() {
+        println!("right={:?}", right);
         panic!(
             "{}\n{}",
             "assertion `left == right` failed",

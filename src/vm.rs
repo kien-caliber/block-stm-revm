@@ -452,6 +452,10 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        if matches!(self.lazy_strategy, LazyStrategy::ERC20Transfer) {
+            return Ok(U256::from(1).wrapping_shl(255));
+        }
+
         let location_hash = self
             .vm
             .hasher
@@ -487,6 +491,7 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
                                     storage_value_addition =
                                         storage_value_addition.wrapping_sub(*subtraction);
                                 }
+                                MemoryValue::ERC20Unchanged => {}
                                 MemoryValue::ERC20LazyRecipient(addition) => {
                                     storage_value_addition =
                                         storage_value_addition.wrapping_add(*addition)
@@ -711,19 +716,25 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     }
 
                     // TODO: We should move this changed check to our read set like for account info?
-                    for (slot, value) in account.changed_storage_slots() {
+                    for (slot, value) in account.storage.iter() {
                         let memory_location_hash = self
                             .hasher
                             .hash_one(MemoryLocation::Storage(*address, *slot));
                         match evm.db().lazy_strategy {
                             LazyStrategy::None => {
-                                write_set.push((
-                                    memory_location_hash,
-                                    MemoryValue::Storage(value.present_value),
-                                ));
+                                if value.is_changed() {
+                                    write_set.push((
+                                        memory_location_hash,
+                                        MemoryValue::Storage(value.present_value),
+                                    ));
+                                }
                             }
                             LazyStrategy::RawTransfer => unreachable!(),
                             LazyStrategy::ERC20Transfer => {
+                                println!(
+                                    "value.present_value={:?}, value.original_value={:?}",
+                                    value.present_value, value.original_value
+                                );
                                 match Ord::cmp(&value.present_value, &value.original_value) {
                                     std::cmp::Ordering::Less => {
                                         self.mv_memory
@@ -736,7 +747,15 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                             ),
                                         ))
                                     }
-                                    std::cmp::Ordering::Equal => {}
+                                    std::cmp::Ordering::Equal => {
+                                        self.mv_memory
+                                            .lazy_locations
+                                            .insert(MemoryLocation::Storage(*address, *slot));
+                                        write_set.push((
+                                            memory_location_hash,
+                                            MemoryValue::ERC20Unchanged,
+                                        ))
+                                    }
                                     std::cmp::Ordering::Greater => {
                                         self.mv_memory
                                             .lazy_locations
