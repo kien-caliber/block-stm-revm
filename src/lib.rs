@@ -81,6 +81,8 @@ enum MemoryValue {
     LazyRecipient(U256),
     // Explicit balance subtraction & implicit nonce increment.
     LazySender(U256),
+    ERC20LazySender(U256),
+    ERC20LazyRecipient(U256),
     // The account was self-destructed.
     SelfDestructed,
 }

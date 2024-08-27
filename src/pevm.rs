@@ -325,8 +325,40 @@ impl Pevm {
                     }
                 }
                 MemoryLocation::CodeHash(_) => unreachable!(),
-                MemoryLocation::Storage(_address, _index) => {
-                    unimplemented!()
+                MemoryLocation::Storage(address, index) => {
+                    let location_hash = self
+                        .hasher
+                        .hash_one(MemoryLocation::Storage(*address, *index));
+                    if let Some(write_history) = mv_memory.read_location(&location_hash) {
+                        let mut storage_value = U256::ZERO;
+                        if let Ok(value) = storage.storage(address, index) {
+                            storage_value = value
+                        }
+
+                        for (tx_idx, memory_entry) in write_history.iter() {
+                            match memory_entry {
+                                MemoryEntry::Data(_, MemoryValue::Storage(value)) => {
+                                    storage_value = *value;
+                                }
+                                MemoryEntry::Data(_, MemoryValue::ERC20LazyRecipient(value)) => {
+                                    storage_value += value;
+                                }
+                                MemoryEntry::Data(_, MemoryValue::ERC20LazySender(value)) => {
+                                    storage_value -= value;
+                                }
+                                _ => unreachable!(),
+                            }
+
+                            let tx_result =
+                                unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
+                            let account = tx_result.state.entry(*address).or_default();
+                            if let Some(account) = account {
+                                account.storage.insert(*index, storage_value);
+                            } else {
+                                unreachable!();
+                            }
+                        }
+                    }
                 }
             }
         }
