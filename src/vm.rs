@@ -1,5 +1,5 @@
 use ahash::HashMapExt;
-use alloy_primitives::{aliases::B32, fixed_bytes};
+use alloy_primitives::{aliases::B32, fixed_bytes, uint};
 use alloy_rpc_types::Receipt;
 use dashmap::DashMap;
 use defer_drop::DeferDrop;
@@ -453,7 +453,17 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         if matches!(self.lazy_strategy, LazyStrategy::ERC20Transfer) {
-            return Ok(U256::from(1).wrapping_shl(255));
+            if index
+                == uint!(0x16949a4e73fc27792d8999af4853e0aa57bba978281383b3db01dc5c2bf22b26_U256)
+            {
+                return Ok(U256::from(1).wrapping_shl(32));
+            }
+
+            if index
+                == uint!(0xde2fdd5c24ea19b5ee1141c3414584362088dd0f070a550793524541ff6d44c6_U256)
+            {
+                return Ok(U256::from(1).wrapping_shl(32));
+            }
         }
 
         let location_hash = self
@@ -732,8 +742,8 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                             LazyStrategy::RawTransfer => unreachable!(),
                             LazyStrategy::ERC20Transfer => {
                                 println!(
-                                    "value.present_value={:?}, value.original_value={:?}",
-                                    value.present_value, value.original_value
+                                    "address={:?} slot={:?} value.present_value={:?}, value.original_value={:?}",
+                                    address, slot,  value.present_value, value.original_value
                                 );
                                 match Ord::cmp(&value.present_value, &value.original_value) {
                                     std::cmp::Ordering::Less => {

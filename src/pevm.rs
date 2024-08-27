@@ -130,7 +130,7 @@ impl Pevm {
 
         let block_size = txs.len();
 
-        println!("372 = {:?}", txs[372].data);
+        println!("366 = {:?}", txs[366].data);
 
         // Accumulated data to be defer-dropped once.
         // TODO: Provide more explicit garbage collecting configs for users.
@@ -224,8 +224,8 @@ impl Pevm {
         }
 
         println!(
-            "fully_evaluated_results[372] = {:?}",
-            fully_evaluated_results[372].state
+            "fully_evaluated_results[366] = {:?}",
+            fully_evaluated_results[366].state
         );
 
         // We fully evaluate (the balance and nonce of) the beneficiary account
@@ -345,17 +345,21 @@ impl Pevm {
                         println!("storage_value={:?}", storage_value);
 
                         for (tx_idx, memory_entry) in write_history.iter() {
+                            let mut changed = false;
                             println!("tx_idx={:?} memory_entry={:?}", tx_idx, memory_entry);
                             match memory_entry {
                                 MemoryEntry::Data(_, MemoryValue::Storage(value)) => {
                                     storage_value = *value;
+                                    changed = true;
                                 }
                                 MemoryEntry::Data(_, MemoryValue::ERC20LazyRecipient(value)) => {
                                     storage_value += value;
+                                    changed = true;
                                 }
                                 MemoryEntry::Data(_, MemoryValue::ERC20Unchanged) => {}
                                 MemoryEntry::Data(_, MemoryValue::ERC20LazySender(value)) => {
                                     storage_value -= value;
+                                    changed = true;
                                 }
                                 _ => unreachable!(),
                             }
@@ -367,8 +371,10 @@ impl Pevm {
                             let account = tx_result.state.entry(*address).or_default();
                             if let Some(account) = account {
                                 account.storage.insert(*index, storage_value);
-                            } else {
+                            } else if changed {
                                 unreachable!();
+                            } else {
+                                println!("unchanged address={:?} index={:?}", address, index,)
                             }
                         }
                     }
@@ -377,8 +383,8 @@ impl Pevm {
         }
 
         println!(
-            "fully_evaluated_results[372] = {:?}",
-            fully_evaluated_results[372].state
+            "fully_evaluated_results[366] = {:?}",
+            fully_evaluated_results[366].state
         );
 
         Ok(fully_evaluated_results)
