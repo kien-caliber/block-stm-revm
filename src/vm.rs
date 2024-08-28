@@ -790,7 +790,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     wrote_new_location,
                     next_validation_idx: match db.lazy_strategy {
                         LazyStrategy::None => tx_version.tx_idx,
-                        LazyStrategy::ERC20Transfer { .. } => 0,
+                        LazyStrategy::ERC20Transfer { .. } => tx_version.tx_idx,
                         LazyStrategy::RawTransfer => 0,
                     },
                 }
