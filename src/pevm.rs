@@ -220,14 +220,11 @@ impl Pevm {
             }
         }
 
-        let mut fully_evaluated_results = Vec::with_capacity(block_size);
-        let mut cumulative_gas_used: u128 = 0;
-        for i in 0..block_size {
-            let mut execution_result = index_mutex!(self.execution_results, i).take().unwrap();
-            cumulative_gas_used += execution_result.receipt.cumulative_gas_used;
-            execution_result.receipt.cumulative_gas_used = cumulative_gas_used;
-            fully_evaluated_results.push(execution_result);
-        }
+        let mut fully_evaluated_results: Vec<PevmTxExecutionResult> = self
+            .execution_results
+            .iter()
+            .map(|mutex| mutex.lock().unwrap().take().unwrap())
+            .collect();
 
         // We fully evaluate (the balance and nonce of) the beneficiary account
         // and raw transfer recipients that may have been atomically updated.
@@ -367,6 +364,12 @@ impl Pevm {
         }
 
         self.dropper.drop((mv_memory, scheduler, txs));
+
+        let mut cumulative_gas_used = 0u128;
+        for tx_result in fully_evaluated_results.iter_mut() {
+            cumulative_gas_used += tx_result.receipt.cumulative_gas_used;
+            tx_result.receipt.cumulative_gas_used = cumulative_gas_used;
+        }
 
         Ok(fully_evaluated_results)
     }
