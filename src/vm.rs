@@ -8,7 +8,7 @@ use revm::{
     Context, Database, Evm, EvmContext,
 };
 use smallvec::{smallvec, SmallVec};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use crate::{
     chain::{PevmChain, RewardPolicy},
@@ -67,6 +67,7 @@ impl PevmTxExecutionResult {
 }
 
 // TODO: Rewrite as [Result]
+#[derive(Debug)]
 pub(crate) enum VmExecutionResult {
     Retry,
     FallbackToSequential,
@@ -94,16 +95,7 @@ pub(crate) enum VmExecutionResult {
 enum LazyStrategy {
     None,
     RawTransfer,
-}
-
-impl LazyStrategy {
-    fn from(_tx: &TxEnv, tx_recipient_code_hash: &Option<B256>) -> Self {
-        let Some(_code_hash) = tx_recipient_code_hash else {
-            return LazyStrategy::RawTransfer;
-        };
-
-        LazyStrategy::None
-    }
+    ERC20Transfer,
 }
 
 // A database interface that intercepts reads while executing a specific
@@ -154,17 +146,21 @@ impl<'a, S: Storage, C: PevmChain> VmDb<'a, S, C> {
         // TODO: Only lazy update in block syncing mode, not for block building.
         if let Some(to) = to {
             db.to_code_hash = db.get_code_hash(*to)?;
-            db.lazy_strategy = LazyStrategy::from(&vm.txs[*tx_idx], &db.to_code_hash);
-            if db.lazy_strategy == LazyStrategy::RawTransfer {
+
+            if db.to_code_hash.is_none() {
                 // We only lazy update raw transfers that already have the sender
                 // or recipient in [MvMemory] since sequentially evaluating memory
                 // locations with only one entry is much costlier than fully
                 // evaluating it concurrently.
-                if !vm.mv_memory.data.contains_key(&from_hash)
-                    && !vm.mv_memory.data.contains_key(&to_hash.unwrap())
+                db.lazy_strategy = if vm.mv_memory.data.contains_key(&from_hash)
+                    || vm.mv_memory.data.contains_key(&to_hash.unwrap())
                 {
-                    db.lazy_strategy = LazyStrategy::None
+                    LazyStrategy::RawTransfer
+                } else {
+                    LazyStrategy::None
                 }
+            } else if vm.chain.is_erc20_transfer(&vm.txs[*tx_idx]) {
+                db.lazy_strategy = LazyStrategy::ERC20Transfer
             }
         }
         Ok(db)
@@ -438,39 +434,114 @@ impl<'a, S: Storage, C: PevmChain> Database for VmDb<'a, S, C> {
             .hash_one(MemoryLocation::Storage(address, index));
 
         let read_origins = self.read_set.entry(location_hash).or_default();
+        read_origins.clear();
+
+        if self.lazy_strategy == LazyStrategy::ERC20Transfer {
+            if Some(&address) == self.to {
+                read_origins.push(ReadOrigin::Storage);
+                return self
+                    .vm
+                    .storage
+                    .storage(&address, &index)
+                    .map_err(|err| ReadError::StorageError(err.to_string()));
+            }
+        }
+
+        // Same as Self::basic
+        // let has_prev_origins = !read_origins.is_empty();
+        // let mut new_origins = SmallVec::new();
+
+        let mut final_storage_value = Some(U256::ZERO);
+        let mut accumulated_addition = U256::ZERO;
+        let mut accumulated_subtraction = U256::ZERO;
 
         // Try reading from multi-version data
         if self.tx_idx > &0 {
             if let Some(written_transactions) = self.vm.mv_memory.data.get(&location_hash) {
-                if let Some((closest_idx, entry)) =
-                    written_transactions.range(..self.tx_idx).next_back()
-                {
-                    match entry {
-                        MemoryEntry::Data(tx_incarnation, MemoryValue::Storage(value)) => {
-                            Self::push_origin(
-                                read_origins,
-                                ReadOrigin::MvMemory(TxVersion {
-                                    tx_idx: *closest_idx,
-                                    tx_incarnation: *tx_incarnation,
-                                }),
-                            )?;
-                            return Ok(*value);
+                let mut iter = written_transactions.range(..self.tx_idx);
+
+                loop {
+                    match iter.next_back() {
+                        Some((blocking_idx, MemoryEntry::Estimate)) => {
+                            return Err(ReadError::BlockingIndex(*blocking_idx))
                         }
-                        MemoryEntry::Estimate => {
-                            return Err(ReadError::BlockingIndex(*closest_idx))
+                        Some((closest_idx, MemoryEntry::Data(tx_incarnation, value))) => {
+                            // // About to push a new origin
+                            // // Inconsistent: new origin will be longer than the previous!
+                            // if has_prev_origins && read_origins.len() == new_origins.len() {
+                            //     return Err(ReadError::InconsistentRead);
+                            // }
+                            // let origin = ReadOrigin::MvMemory(TxVersion {
+                            //     tx_idx: *closest_idx,
+                            //     tx_incarnation: *tx_incarnation,
+                            // });
+                            // // Inconsistent: new origin is different from the previous!
+                            // if has_prev_origins
+                            //     && unsafe { read_origins.get_unchecked(new_origins.len()) }
+                            //         != &origin
+                            // {
+                            //     println!("ReadError::InconsistentRead");
+                            //     return Err(ReadError::InconsistentRead);
+                            // }
+                            // new_origins.push(origin);
+
+                            read_origins.push(ReadOrigin::MvMemory(TxVersion {
+                                tx_idx: *closest_idx,
+                                tx_incarnation: *tx_incarnation,
+                            }));
+
+                            match value {
+                                MemoryValue::Storage(storage_value) => {
+                                    final_storage_value = Some(*storage_value);
+                                    break;
+                                }
+                                MemoryValue::ERC20TransferAddition(addition) => {
+                                    accumulated_addition += addition;
+                                }
+                                MemoryValue::ERC20TransferSubtraction(subtraction) => {
+                                    accumulated_subtraction += subtraction;
+                                }
+                                _ => return Err(ReadError::InvalidMemoryLocationType),
+                            };
                         }
-                        _ => return Err(ReadError::InvalidMemoryLocationType),
+                        None => break,
                     }
                 }
             }
         }
 
         // Fall back to storage
-        Self::push_origin(read_origins, ReadOrigin::Storage)?;
-        self.vm
-            .storage
-            .storage(&address, &index)
-            .map_err(|err| ReadError::StorageError(err.to_string()))
+        if final_storage_value.is_none() {
+            // // Populate [Storage] on the first read
+            // if !has_prev_origins {
+            //     new_origins.push(ReadOrigin::Storage);
+            // }
+            // // Inconsistent: previous origin is longer or didn't read
+            // // from storage for the last origin.
+            // else if read_origins.len() != new_origins.len() + 1
+            //     || read_origins.last() != Some(&ReadOrigin::Storage)
+            // {
+            //     println!("ReadError::InconsistentRead");
+            //     return Err(ReadError::InconsistentRead);
+            // }
+            final_storage_value = Some(
+                self.vm
+                    .storage
+                    .storage(&address, &index)
+                    .map_err(|err| ReadError::StorageError(err.to_string()))?,
+            );
+        }
+
+        // // Populate read origins on the first read.
+        // // Otherwise [read_origins] matches [new_origins] already.
+        // if !has_prev_origins {
+        //     *read_origins = new_origins;
+        // }
+
+        Ok(
+            final_storage_value.unwrap_or_default() + accumulated_addition
+                - accumulated_subtraction,
+        )
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
@@ -626,7 +697,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                                         ));
                                     }
                                 }
-                                LazyStrategy::None => {
+                                LazyStrategy::ERC20Transfer | LazyStrategy::None => {
                                     write_set.push((
                                         account_location_hash,
                                         MemoryValue::Basic(AccountBasic {
@@ -653,11 +724,49 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
 
                     // TODO: We should move this changed check to our read set like for account info?
                     for (slot, value) in account.changed_storage_slots() {
-                        write_set.push((
-                            self.hasher
-                                .hash_one(MemoryLocation::Storage(*address, *slot)),
-                            MemoryValue::Storage(value.present_value),
-                        ));
+                        match evm.db().lazy_strategy {
+                            LazyStrategy::None => {
+                                write_set.push((
+                                    self.hasher
+                                        .hash_one(MemoryLocation::Storage(*address, *slot)),
+                                    MemoryValue::Storage(value.present_value),
+                                ));
+                            }
+                            LazyStrategy::ERC20Transfer => {
+                                let memory_location = MemoryLocation::Storage(*address, *slot);
+                                let memory_location_hash = self.hasher.hash_one(&memory_location);
+                                assert_eq!(
+                                    memory_location_hash,
+                                    self.hasher
+                                        .hash_one(MemoryLocation::Storage(*address, *slot))
+                                );
+                                self.mv_memory.lazy_locations.insert(memory_location);
+
+                                match Ord::cmp(&value.present_value, &value.original_value) {
+                                    Ordering::Less => {
+                                        write_set.push((
+                                            memory_location_hash,
+                                            MemoryValue::ERC20TransferSubtraction(
+                                                value.original_value - value.present_value,
+                                            ),
+                                        ));
+                                    }
+                                    Ordering::Greater => {
+                                        write_set.push((
+                                            memory_location_hash,
+                                            MemoryValue::ERC20TransferAddition(
+                                                value.present_value - value.original_value,
+                                            ),
+                                        ));
+                                    }
+                                    Ordering::Equal => {
+                                        // Unreachable because we are iterating `account.CHANGED_storage_slots()`.
+                                        unreachable!()
+                                    }
+                                }
+                            }
+                            LazyStrategy::RawTransfer => todo!(),
+                        }
                     }
                 }
 
@@ -679,6 +788,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
                     wrote_new_location,
                     next_validation_idx: match db.lazy_strategy {
                         LazyStrategy::RawTransfer => 0,
+                        LazyStrategy::ERC20Transfer => 0,
                         LazyStrategy::None => tx_version.tx_idx,
                     },
                 }

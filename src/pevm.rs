@@ -180,6 +180,7 @@ impl Pevm {
                 scope.spawn(|| {
                     let mut task = scheduler.next_task();
                     while task.is_some() {
+                        println!("task={:?}", task);
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
                                 self.try_execute(&vm, &scheduler, tx_version)
@@ -332,8 +333,61 @@ impl Pevm {
                         }
                     }
                 }
+                MemoryLocation::Storage(address, index) => {
+                    let location_hash = self
+                        .hasher
+                        .hash_one(MemoryLocation::Storage(*address, *index));
+                    if let Some(write_history) = mv_memory.data.get(&location_hash) {
+                        let mut storage_value = U256::ZERO;
+
+                        // Read from storage if the first multi-version entry is not an absolute value.
+                        if !matches!(
+                            write_history.first_key_value(),
+                            Some((_, MemoryEntry::Data(_, MemoryValue::Storage(_))))
+                        ) {
+                            if let Ok(value) = storage.storage(address, index) {
+                                storage_value = value
+                            }
+                        }
+
+                        for (tx_idx, memory_entry) in write_history.iter() {
+                            match memory_entry {
+                                MemoryEntry::Data(_, MemoryValue::Storage(value)) => {
+                                    storage_value = *value
+                                }
+                                MemoryEntry::Data(
+                                    _,
+                                    MemoryValue::ERC20TransferAddition(addition),
+                                ) => storage_value += addition, // TODO: check zeroness
+                                MemoryEntry::Data(
+                                    _,
+                                    MemoryValue::ERC20TransferSubtraction(subtraction),
+                                ) => {
+                                    if &storage_value < subtraction {
+                                        // There is hardly anything we can do here, because our initial assumption has failed.
+                                        // TODO: Instead of re-run everything sequentially, we can re-run in parallel with
+                                        // an option to disable lazy updates for ERC20 transfers.
+                                        return execute_revm_sequential(
+                                            storage, chain, spec_id, block_env, txs,
+                                        );
+                                    }
+                                    storage_value -= subtraction;
+                                }
+                                _ => unreachable!(),
+                            }
+
+                            let tx_result =
+                                unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
+                            let account = tx_result.state.entry(*address).or_default();
+                            if let Some(account) = account {
+                                account.storage.insert(*index, storage_value);
+                            } else {
+                                unreachable!()
+                            }
+                        }
+                    }
+                }
                 MemoryLocation::CodeHash(_) => unreachable!(),
-                MemoryLocation::Storage(_, _) => unimplemented!(),
             }
         }
 
@@ -349,7 +403,9 @@ impl Pevm {
         tx_version: TxVersion,
     ) -> Option<Task> {
         loop {
-            return match vm.execute(&tx_version) {
+            let r = vm.execute(&tx_version);
+            println!("r={:?} tx_version={:?}", r, tx_version);
+            return match r {
                 VmExecutionResult::Retry => {
                     if self.abort_reason.get().is_none() {
                         continue;

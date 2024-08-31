@@ -53,12 +53,23 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
     for block_path in fs::read_dir("data/blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
+        println!("block_number={:?}", block_number);
 
         // Parse block
         let block: Block = serde_json::from_reader(BufReader::new(
             File::open(format!("data/blocks/{block_number}/block.json")).unwrap(),
         ))
         .unwrap();
+
+        for (index, tx) in block
+            .transactions
+            .as_transactions()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            println!("{:?}: tx.hash={:?}", index, tx.hash);
+        }
 
         // Parse state
         let accounts: HashMap<Address, EvmAccount> = serde_json::from_reader(BufReader::new(
