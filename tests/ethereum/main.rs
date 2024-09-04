@@ -63,9 +63,6 @@ fn build_block_env(env: &Env) -> BlockEnv {
 
 fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv, ParseError> {
     Ok(TxEnv {
-        #[cfg(feature = "optimism")]
-        optimism: revm::primitives::OptimismFields::default(),
-
         caller: if let Some(address) = tx.sender {
             address
         } else if let Some(address) = recover_address(tx.secret_key.as_slice()) {
@@ -93,6 +90,8 @@ fn build_tx_env(tx: &TransactionParts, indexes: &TxPartIndices) -> Result<TxEnv,
         blob_hashes: tx.blob_versioned_hashes.clone(),
         max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
         authorization_list: None, // TODO: Support in the upcoming hardfork
+        #[cfg(feature = "optimism")]
+        optimism: revm::primitives::OptimismFields::default(),
     })
 }
 

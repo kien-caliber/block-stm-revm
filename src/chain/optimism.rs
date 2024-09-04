@@ -14,39 +14,29 @@ use revm::{
     Handler,
 };
 
-use crate::{
-    mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult, TxIdx,
-};
+use crate::{mv_memory::MvMemory, BuildIdentityHasher, MemoryLocation, PevmTxExecutionResult};
 
 use super::{PevmChain, RewardPolicy};
-
-/// Error when converting [Transaction] to [OptimismFields]
-#[derive(Debug, Clone, PartialEq)]
-pub enum OptimismFieldsConversionError {
-    MissingSourceHash,
-    UnexpectedType(u8),
-    SerdeError(String),
-    ConversionError(String),
-}
 
 /// Represents errors that can occur when parsing transactions
 #[derive(Debug, Clone, PartialEq)]
 pub enum OptimismTxEnvError {
-    OverflowedGasLimit,
+    ConversionError(String),
     GasPriceError(OptimismGasPriceError),
-    MissingMaxFeePerGas,
     InvalidType(u8),
-    OptimismFieldsConversionError(OptimismFieldsConversionError),
+    MissingMaxFeePerGas,
+    MissingSourceHash,
+    OverflowedGasLimit,
+    SerdeError(String),
+    UnexpectedType(u8),
 }
 
 /// Convert [Transaction] to [OptimismFields]
-pub(crate) fn get_optimism_fields(
-    tx: &Transaction,
-) -> Result<OptimismFields, OptimismFieldsConversionError> {
+pub(crate) fn get_optimism_fields(tx: &Transaction) -> Result<OptimismFields, OptimismTxEnvError> {
     let envelope_buf = {
         let tx_type = tx.inner.transaction_type.unwrap_or_default();
         let op_tx_type = OpTxType::try_from(tx_type)
-            .map_err(|_err| OptimismFieldsConversionError::UnexpectedType(tx_type))?;
+            .map_err(|_err| OptimismTxEnvError::UnexpectedType(tx_type))?;
         let inner = tx.inner.clone();
         let tx_envelope = match op_tx_type {
             OpTxType::Legacy => Signed::<TxLegacy>::try_from(inner).map(OpTxEnvelope::from),
@@ -57,7 +47,7 @@ pub(crate) fn get_optimism_fields(
                 let tx_deposit = TxDeposit {
                     source_hash: tx
                         .source_hash
-                        .ok_or(OptimismFieldsConversionError::MissingSourceHash)?,
+                        .ok_or(OptimismTxEnvError::MissingSourceHash)?,
                     from: tx.inner.from,
                     to: tx.inner.to.into(),
                     mint: tx.mint,
@@ -69,7 +59,7 @@ pub(crate) fn get_optimism_fields(
                 Ok(OpTxEnvelope::from(tx_deposit))
             }
         }
-        .map_err(|err| OptimismFieldsConversionError::ConversionError(err.to_string()))?;
+        .map_err(|err| OptimismTxEnvError::ConversionError(err.to_string()))?;
 
         let mut envelope_buf = Vec::<u8>::new();
         tx_envelope.encode_2718(&mut envelope_buf);
@@ -197,16 +187,28 @@ impl PevmChain for PevmOptimism {
         txs: &[TxEnv],
     ) -> MvMemory {
         let beneficiary_location_hash = hasher.hash_one(MemoryLocation::Basic(block_env.coinbase));
+        let l1_fee_recipient_location_hash = hasher.hash_one(revm::L1_FEE_RECIPIENT);
+        let base_fee_recipient_location_hash = hasher.hash_one(revm::BASE_FEE_RECIPIENT);
 
         // TODO: Estimate more locations based on sender, to, etc.
         let mut estimated_locations = HashMap::with_hasher(BuildIdentityHasher::default());
-        estimated_locations.insert(
-            beneficiary_location_hash,
-            txs.iter()
-                .enumerate()
-                .filter_map(|(index, tx)| tx.optimism.source_hash.is_none().then_some(index))
-                .collect::<Vec<TxIdx>>(),
-        );
+        for (index, tx) in txs.iter().enumerate() {
+            if tx.optimism.source_hash.is_none() {
+                estimated_locations
+                    .entry(beneficiary_location_hash)
+                    .or_insert_with(|| Vec::with_capacity(txs.len()))
+                    .push(index);
+            } else {
+                estimated_locations
+                    .entry(l1_fee_recipient_location_hash)
+                    .or_insert_with(|| Vec::with_capacity(1))
+                    .push(index);
+                estimated_locations
+                    .entry(base_fee_recipient_location_hash)
+                    .or_insert_with(|| Vec::with_capacity(1))
+                    .push(index);
+            }
+        }
 
         MvMemory::new(
             txs.len(),
@@ -264,10 +266,7 @@ impl PevmChain for PevmOptimism {
 
     fn get_tx_env(&self, tx: Self::Transaction) -> Result<TxEnv, Self::TxEnvError> {
         Ok(TxEnv {
-            #[cfg(feature = "optimism")]
-            optimism: get_optimism_fields(&tx)
-                .map_err(OptimismTxEnvError::OptimismFieldsConversionError)?,
-
+            optimism: get_optimism_fields(&tx)?,
             caller: tx.inner.from,
             gas_limit: tx
                 .inner
