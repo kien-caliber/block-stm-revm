@@ -17,10 +17,9 @@ use op_alloy_network::Optimism;
 use op_alloy_rpc_types::Transaction;
 use pevm::{
     chain::{PevmChain, PevmOptimism},
-    EvmAccount, EvmCode, Pevm, RpcStorage, StorageWrapper,
+    EvmAccount, EvmCode, Pevm, RpcStorage,
 };
 use reqwest::Url;
-use revm::db::CacheDB;
 use tokio::runtime::Runtime;
 
 #[derive(Parser, Debug)]
@@ -42,17 +41,16 @@ struct Args {
     write_bytecodes_to: Option<String>,
 }
 
+type FetchedBlock = (
+    Block<Transaction>,
+    BTreeMap<Address, EvmAccount>,
+    BTreeMap<B256, EvmCode>,
+);
+
 fn fetch_block(
     block_number: u64,
     rpc_url: Url,
-) -> Result<
-    (
-        Block<Transaction>,
-        BTreeMap<Address, EvmAccount>,
-        BTreeMap<B256, EvmCode>,
-    ),
-    Box<dyn std::error::Error>,
-> {
+) -> Result<FetchedBlock, Box<dyn std::error::Error>> {
     let runtime = Runtime::new()?;
     let provider = ProviderBuilder::<_, _, Optimism>::default().on_http(rpc_url);
     let block = runtime
@@ -63,13 +61,12 @@ fn fetch_block(
     let spec_id = chain.get_block_spec(&block.header).unwrap();
     let pre_state_rpc_storage =
         RpcStorage::new(provider.clone(), spec_id, BlockId::number(block_number - 1));
-    let pre_state_db = CacheDB::new(StorageWrapper(&pre_state_rpc_storage));
     let concurrency_level =
         std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN);
 
     let mut pevm = Pevm::default();
     pevm.execute(
-        &pre_state_db,
+        &pre_state_rpc_storage,
         &chain,
         block.clone(),
         concurrency_level,
