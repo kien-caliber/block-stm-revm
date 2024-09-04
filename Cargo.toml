@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 optimism = ["revm/optimism"]
-default = ["optimism"]
 
 [dependencies]
 # Put this behind a feature flag if there are use cases & users
@@ -44,7 +43,6 @@ tokio = { version = "1.40.0", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 bincode = "1.3.3"
-clap = { version = "4.5.13", features = ["derive", "env"] }
 criterion = "0.5.1"
 rand = "0.8.5"
 rayon = "1.10.0"

@@ -677,7 +677,7 @@ impl<'a, S: Storage, C: PevmChain> Vm<'a, S, C> {
         write_set: &mut WriteSet,
         tx: &TxEnv,
         gas_used: U256,
-        evm_context: &EvmContext<DB>,
+        #[allow(unused_variables)] evm_context: &EvmContext<DB>,
     ) {
         let mut gas_price = if let Some(priority_fee) = tx.gas_priority_fee {
             std::cmp::min(tx.gas_price, priority_fee + self.block_env.basefee)

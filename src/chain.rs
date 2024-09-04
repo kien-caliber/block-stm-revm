@@ -9,7 +9,7 @@ use revm::{
     Handler,
 };
 
-use crate::{mv_memory::MvMemory, MemoryLocationHash, PevmTxExecutionResult};
+use crate::{mv_memory::MvMemory, PevmTxExecutionResult};
 
 /// Different chains may have varying reward policies.
 /// This enum specifies which policy to follow, with optional
@@ -22,9 +22,9 @@ pub enum RewardPolicy {
     #[cfg(feature = "optimism")]
     Optimism {
         /// L1 Fee Receipient
-        l1_fee_recipient_location_hash: MemoryLocationHash,
+        l1_fee_recipient_location_hash: crate::MemoryLocationHash,
         /// Base Fee Vault
-        base_fee_vault_location_hash: MemoryLocationHash,
+        base_fee_vault_location_hash: crate::MemoryLocationHash,
     },
 }
 
