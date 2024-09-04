@@ -6,10 +6,9 @@ use alloy_rpc_types::{BlockId, BlockTransactionsKind};
 use op_alloy_network::Optimism;
 use pevm::{
     chain::{PevmChain, PevmOptimism},
-    EvmAccount, Pevm, RpcStorage, Storage, StorageWrapper,
+    EvmAccount, Pevm, RpcStorage, Storage,
 };
 use reqwest::Url;
-use revm::db::CacheDB;
 use revm::primitives::SpecId;
 use tokio::runtime::Runtime;
 
@@ -17,15 +16,17 @@ pub mod common;
 
 #[test]
 fn optimism_blocks_from_rpc() -> Result<(), Box<dyn std::error::Error>> {
-    let rpc_url = match std::env::var("RPC_URL") {
+    let rpc_url = match std::env::var("OPTIMISM_RPC_URL") {
         // The empty check is for GitHub Actions where the variable is set with an empty string when unset!?
         Ok(value) if !value.is_empty() => value.parse()?,
         _ => Url::parse("https://mainnet.optimism.io")?,
     };
 
     for block_number in [
-        // random 8 blocks
-        111435579, 112003352, 114470424, 114673497, 118446712, 118931697, 121413120, 123129762,
+        // Here are random 8 blocks. The latter 6 have been commented because the CI is too slow.
+        111435579,
+        112003352,
+        // 114470424, 114673497, 118446712, 118931697, 121413120, 123129762,
     ] {
         dbg!(block_number);
         let runtime = Runtime::new()?;
@@ -39,21 +40,20 @@ fn optimism_blocks_from_rpc() -> Result<(), Box<dyn std::error::Error>> {
         let spec_id = chain.get_block_spec(&block.header).unwrap();
         let pre_state_rpc_storage =
             RpcStorage::new(provider.clone(), spec_id, BlockId::number(block_number - 1));
-        let pre_state_db = CacheDB::new(StorageWrapper(&pre_state_rpc_storage));
 
         let concurrency_level =
             std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN);
 
         let mut pevm = Pevm::default();
         let sequential_result = pevm.execute(
-            &pre_state_db,
+            &pre_state_rpc_storage,
             &chain,
             block.clone(),
             concurrency_level,
             true,
         );
         let parallel_result = pevm.execute(
-            &pre_state_db,
+            &pre_state_rpc_storage,
             &chain,
             block.clone(),
             concurrency_level,
