@@ -68,6 +68,10 @@ harness = false
 name = "gigagas"
 harness = false
 
+[[bench]]
+name = "optimism"
+harness = false
+
 [profile.release]
 codegen-units = 1
 panic = "abort"
