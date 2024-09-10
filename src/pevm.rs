@@ -1,4 +1,5 @@
 use std::{
+    collections::BinaryHeap,
     fmt::Debug,
     num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
@@ -101,6 +102,7 @@ impl Pevm {
         block: Block<C::Transaction>,
         concurrency_level: NonZeroUsize,
         force_sequential: bool,
+        priority_limit: Option<usize>,
     ) -> PevmResult<C> {
         let spec_id = chain
             .get_block_spec(&block.header)
@@ -128,6 +130,7 @@ impl Pevm {
                 block_env,
                 tx_envs,
                 concurrency_level,
+                priority_limit,
             )
         }
     }
@@ -143,13 +146,28 @@ impl Pevm {
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         concurrency_level: NonZeroUsize,
+        priority_limit: Option<usize>,
     ) -> PevmResult<C> {
         if txs.is_empty() {
             return Ok(Vec::new());
         }
 
         let block_size = txs.len();
-        let scheduler = Scheduler::new(block_size);
+        let priority_txs = {
+            let priority_limit = priority_limit.unwrap_or(concurrency_level.get());
+            let mut heap = BinaryHeap::with_capacity(priority_limit);
+            if priority_limit > 0 {
+                for (tx_idx, tx_env) in txs.iter().enumerate() {
+                    heap.push((!tx_env.gas_limit, tx_idx));
+                    if heap.len() > priority_limit {
+                        heap.pop();
+                    }
+                }
+            }
+            heap.into_iter().map(|(_, tx_idx)| tx_idx)
+        };
+        // dbg!(&priority_txs);
+        let scheduler = Scheduler::new(block_size, priority_txs);
 
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(

@@ -60,6 +60,9 @@ pub fn for_each_block_from_disk(mut handler: impl FnMut(Block, InMemoryStorage))
     for block_path in fs::read_dir("data/blocks").unwrap() {
         let block_path = block_path.unwrap().path();
         let block_number = block_path.file_name().unwrap().to_str().unwrap();
+        if block_number != "19807137" {
+            continue;
+        }
 
         // Parse block
         let block: Block = serde_json::from_reader(BufReader::new(

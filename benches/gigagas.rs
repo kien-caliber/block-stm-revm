@@ -56,6 +56,7 @@ pub fn bench(c: &mut Criterion, name: &str, storage: InMemoryStorage, txs: Vec<T
                 black_box(block_env.clone()),
                 black_box(txs.clone()),
                 black_box(concurrency_level),
+                black_box(None),
             )
         })
     });

@@ -40,6 +40,7 @@ pub fn test_execute_revm<S: Storage + Send + Sync>(storage: S, txs: Vec<TxEnv>) 
             BlockEnv::default(),
             txs,
             concurrency_level,
+            None,
         ),
     );
 }
@@ -54,8 +55,16 @@ pub fn test_execute_alloy<S: Storage + Send + Sync, C: PevmChain + Send + Sync +
 ) {
     let concurrency_level = thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
     let mut pevm = Pevm::default();
-    let sequential_result = pevm.execute(storage, chain, block.clone(), concurrency_level, true);
-    let parallel_result = pevm.execute(storage, chain, block.clone(), concurrency_level, false);
+    let sequential_result =
+        pevm.execute(storage, chain, block.clone(), concurrency_level, true, None);
+    let parallel_result = pevm.execute(
+        storage,
+        chain,
+        block.clone(),
+        concurrency_level,
+        false,
+        None,
+    );
     assert_eq!(&sequential_result, &parallel_result);
 
     let tx_results = sequential_result.unwrap();

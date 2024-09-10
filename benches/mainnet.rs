@@ -47,7 +47,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             block.transactions.len(),
             block.header.gas_used
         ));
-        group.bench_function("Sequential", |b| {
+        group.bench_function("S", |b| {
             b.iter(|| {
                 pevm.execute(
                     black_box(&storage),
@@ -55,10 +55,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     black_box(block.clone()),
                     black_box(concurrency_level),
                     black_box(true),
+                    black_box(None),
                 )
             })
         });
-        group.bench_function("Parallel", |b| {
+        group.bench_function("P0", |b| {
             b.iter(|| {
                 pevm.execute(
                     black_box(&storage),
@@ -66,6 +67,43 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     black_box(block.clone()),
                     black_box(concurrency_level),
                     black_box(false),
+                    black_box(Some(0)),
+                )
+            })
+        });
+        group.bench_function("P8", |b| {
+            b.iter(|| {
+                pevm.execute(
+                    black_box(&storage),
+                    black_box(&chain),
+                    black_box(block.clone()),
+                    black_box(concurrency_level),
+                    black_box(false),
+                    black_box(Some(8)),
+                )
+            })
+        });
+        group.bench_function("P16", |b| {
+            b.iter(|| {
+                pevm.execute(
+                    black_box(&storage),
+                    black_box(&chain),
+                    black_box(block.clone()),
+                    black_box(concurrency_level),
+                    black_box(false),
+                    black_box(Some(16)),
+                )
+            })
+        });
+        group.bench_function("P32", |b| {
+            b.iter(|| {
+                pevm.execute(
+                    black_box(&storage),
+                    black_box(&chain),
+                    black_box(block.clone()),
+                    black_box(concurrency_level),
+                    black_box(false),
+                    black_box(Some(32)),
                 )
             })
         });
