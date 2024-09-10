@@ -60,12 +60,14 @@ pub(crate) struct Scheduler {
     // True if the scheduler has been aborted, likely due to fatal execution
     // errors.
     aborted: AtomicBool,
+    // Heavy txs are executed first
+    priority_txs: Vec<TxIdx>,
 }
 
 // TODO: Better error handling.
 // Like returning errors instead of panicking on [unreachable]s.
 impl Scheduler {
-    pub(crate) fn new(block_size: usize) -> Self {
+    pub(crate) fn new(block_size: usize, priority_txs: Vec<TxIdx>) -> Self {
         Self {
             block_size,
             execution_idx: AtomicUsize::new(0),
@@ -84,6 +86,7 @@ impl Scheduler {
             min_validation_idx: AtomicUsize::new(block_size),
             num_validated: AtomicUsize::new(0),
             aborted: AtomicBool::new(false),
+            priority_txs,
         }
     }
 
@@ -106,6 +109,19 @@ impl Scheduler {
     }
 
     pub(crate) fn next_task(&self) -> Option<Task> {
+        if !self.aborted.load(Ordering::Acquire) {
+            for tx_idx in self.priority_txs.iter().copied() {
+                let mut tx = index_mutex!(self.transactions_status, tx_idx);
+                if tx.status == IncarnationStatus::ReadyToExecute {
+                    tx.status = IncarnationStatus::Executing;
+                    return Some(Task::Execution(TxVersion {
+                        tx_idx,
+                        tx_incarnation: tx.incarnation,
+                    }));
+                }
+            }
+        }
+
         while !self.aborted.load(Ordering::Acquire) {
             let execution_idx = self.execution_idx.load(Ordering::Acquire);
             let validation_idx = self.validation_idx.load(Ordering::Acquire);

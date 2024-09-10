@@ -25,7 +25,7 @@ use crate::{
     scheduler::Scheduler,
     storage::StorageWrapper,
     vm::{build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionResult},
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxVersion,
 };
 
 /// Errors when executing a block with pevm.
@@ -149,7 +149,10 @@ impl Pevm {
         }
 
         let block_size = txs.len();
-        let scheduler = Scheduler::new(block_size);
+        let mut priority_txs: Vec<TxIdx> = Vec::from_iter(0..block_size);
+        priority_txs.sort_by_key(|i| unsafe { !txs.get_unchecked(*i).gas_limit });
+        priority_txs.truncate(concurrency_level.get());
+        let scheduler = Scheduler::new(block_size, priority_txs);
 
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
