@@ -110,22 +110,24 @@ impl Scheduler {
         None
     }
 
-    pub(crate) fn next_task(&self) -> Option<Task> {
-        while !self.aborted.load(Ordering::Acquire) {
-            if self.priority_idx.load(Ordering::Acquire) >= self.priority_txs.len() {
-                break;
-            }
-            let priority_idx = self.priority_idx.fetch_add(1, Ordering::Release);
-            let Some(tx_idx) = self.priority_txs.get(priority_idx).copied() else {
-                break;
-            };
-            let mut tx = index_mutex!(self.transactions_status, tx_idx);
-            if tx.status == IncarnationStatus::ReadyToExecute {
-                tx.status = IncarnationStatus::Executing;
-                return Some(Task::Execution(TxVersion {
-                    tx_idx,
-                    tx_incarnation: tx.incarnation,
-                }));
+    pub(crate) fn next_task(&self, allow_priority_txs: bool) -> Option<Task> {
+        if allow_priority_txs {
+            while !self.aborted.load(Ordering::Acquire) {
+                if self.priority_idx.load(Ordering::Acquire) >= self.priority_txs.len() {
+                    break;
+                }
+                let priority_idx = self.priority_idx.fetch_add(1, Ordering::Release);
+                let Some(tx_idx) = self.priority_txs.get(priority_idx).copied() else {
+                    break;
+                };
+                let mut tx = index_mutex!(self.transactions_status, tx_idx);
+                if tx.status == IncarnationStatus::ReadyToExecute {
+                    tx.status = IncarnationStatus::Executing;
+                    return Some(Task::Execution(TxVersion {
+                        tx_idx,
+                        tx_incarnation: tx.incarnation,
+                    }));
+                }
             }
         }
 

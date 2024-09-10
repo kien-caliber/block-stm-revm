@@ -188,36 +188,39 @@ impl Pevm {
             }
         }
 
+        let num_threads: usize = concurrency_level.into();
+
+        let f = |thread_index: usize| {
+            let allow_priority_txs = thread_index * 2 < num_threads;
+            let mut task = scheduler.next_task(allow_priority_txs);
+            while task.is_some() {
+                task = match task.unwrap() {
+                    Task::Execution(tx_version) => self.try_execute(&vm, &scheduler, tx_version),
+                    Task::Validation(tx_version) => {
+                        try_validate(&mv_memory, &scheduler, &tx_version)
+                    }
+                };
+
+                // TODO: Have different functions or an enum for the caller to choose
+                // the handling behaviour when a transaction's EVM execution fails.
+                // Parallel block builders would like to exclude such transaction,
+                // verifiers may want to exit early to save CPU cycles, while testers
+                // may want to collect all execution results. We are exiting early as
+                // the default behaviour for now.
+                if self.abort_reason.get().is_some() {
+                    break;
+                }
+
+                if task.is_none() {
+                    task = scheduler.next_task(allow_priority_txs);
+                }
+            }
+        };
+
         // TODO: Better thread handling
         thread::scope(|scope| {
-            for _ in 0..concurrency_level.into() {
-                scope.spawn(|| {
-                    let mut task = scheduler.next_task();
-                    while task.is_some() {
-                        task = match task.unwrap() {
-                            Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
-                            }
-                            Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
-                            }
-                        };
-
-                        // TODO: Have different functions or an enum for the caller to choose
-                        // the handling behaviour when a transaction's EVM execution fails.
-                        // Parallel block builders would like to exclude such transaction,
-                        // verifiers may want to exit early to save CPU cycles, while testers
-                        // may want to collect all execution results. We are exiting early as
-                        // the default behaviour for now.
-                        if self.abort_reason.get().is_some() {
-                            break;
-                        }
-
-                        if task.is_none() {
-                            task = scheduler.next_task();
-                        }
-                    }
-                });
+            for thread_index in 0..num_threads {
+                scope.spawn(move || f(thread_index));
             }
         });
 
