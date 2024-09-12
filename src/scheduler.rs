@@ -7,6 +7,7 @@ use std::{
     thread,
 };
 
+use dashmap::DashMap;
 use smallvec::SmallVec;
 
 use crate::{FinishExecFlags, IncarnationStatus, Task, TxIdx, TxStatus, TxVersion};
@@ -60,6 +61,14 @@ pub(crate) struct Scheduler {
     // True if the scheduler has been aborted, likely due to fatal execution
     // errors.
     aborted: AtomicBool,
+    pub(crate) execution_time: DashMap<
+        TxVersion,
+        (
+            std::thread::ThreadId,
+            std::time::Instant, // start
+            std::time::Instant, // end
+        ),
+    >,
 }
 
 // TODO: Better error handling.
@@ -84,6 +93,7 @@ impl Scheduler {
             min_validation_idx: AtomicUsize::new(block_size),
             num_validated: AtomicUsize::new(0),
             aborted: AtomicBool::new(false),
+            execution_time: DashMap::new(),
         }
     }
 

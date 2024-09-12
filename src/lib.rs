@@ -142,7 +142,7 @@ struct TxStatus {
 // before it in the block, along with the associated version. If no previous
 // transactions have written to a location, the value would be read from the
 // storage state before block execution.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TxVersion {
     tx_idx: TxIdx,
     tx_incarnation: TxIncarnation,
@@ -197,7 +197,7 @@ pub enum ReadError {
 // TODO: Add more useful work when there are idle workers like near
 // the end of block execution, while waiting for a huge blocking
 // transaction to resolve, etc.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 enum Task {
     Execution(TxVersion),
     Validation(TxVersion),

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::Debug,
     num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
@@ -58,6 +59,56 @@ enum AbortReason {
 struct AsyncDropper<T> {
     sender: mpsc::Sender<T>,
     _handle: thread::JoinHandle<()>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Rect {
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+}
+
+impl Rect {
+    // Constructor for the Rect struct
+    fn new(x0: f64, y0: f64, x1: f64, y1: f64) -> Self {
+        Rect { x0, y0, x1, y1 }
+    }
+
+    // Function to compute the union of multiple Rects
+    fn union<'a>(items: impl Iterator<Item = &'a Self>) -> Self {
+        let mut x0 = f64::INFINITY;
+        let mut y0 = f64::INFINITY;
+        let mut x1 = f64::NEG_INFINITY;
+        let mut y1 = f64::NEG_INFINITY;
+
+        for rect in items {
+            x0 = x0.min(rect.x0);
+            y0 = y0.min(rect.y0);
+            x1 = x1.max(rect.x1);
+            y1 = y1.max(rect.y1);
+        }
+
+        Rect::new(x0, y0, x1, y1)
+    }
+
+    // Function to generate SVG <rect> and <text> elements
+    fn to_svg(&self, tx_version: &TxVersion) -> String {
+        let label = format!("{:?}({:?})", tx_version.tx_idx, tx_version.tx_incarnation);
+        let width = self.x1 - self.x0;
+        let height = self.y1 - self.y0;
+        let text_x = self.x0 + width / 2.0;
+        let text_y = self.y0 + height / 2.0;
+        let fill_color = format!(
+            "hsl({}, 50%, 50%)",
+            f64::powi(0.8, tx_version.tx_incarnation as i32) * 120.0
+        );
+
+        format!(
+            r#"<rect x="{}" y="{}" width="{}" height="{}" style="fill:{}" /><text x="{}" y="{}" font-family="Verdana" font-size="12" text-anchor="middle" alignment-baseline="middle">{}</text>"#,
+            self.x0, self.y0, width, height, fill_color, text_x, text_y, label
+        )
+    }
 }
 
 impl<T: Send + 'static> Default for AsyncDropper<T> {
@@ -166,6 +217,8 @@ impl Pevm {
             }
         }
 
+        let t_start = std::time::Instant::now();
+
         // TODO: Better thread handling
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
@@ -174,10 +227,23 @@ impl Pevm {
                     while task.is_some() {
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
+                                let t1 = std::time::Instant::now();
+                                let r = self.try_execute(&vm, &scheduler, tx_version.clone());
+                                let t2 = std::time::Instant::now();
+
+                                scheduler
+                                    .execution_time
+                                    .insert(tx_version, (std::thread::current().id(), t1, t2));
+
+                                r
                             }
                             Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
+                                let r = try_validate(&mv_memory, &scheduler, &tx_version);
+                                // scheduler.end_time.insert(
+                                //     tx_version.clone(),
+                                //     (std::time::Instant::now(), std::thread::current().id()),
+                                // );
+                                r
                             }
                         };
 
@@ -198,6 +264,79 @@ impl Pevm {
                 });
             }
         });
+
+        let t_end = std::time::Instant::now();
+
+        let mut thread_keys: HashMap<std::thread::ThreadId, usize> = HashMap::new();
+
+        let events: Vec<(Rect, TxVersion)> = scheduler
+            .execution_time
+            .iter()
+            .map(|r| {
+                let thread_keys_len = thread_keys.len();
+                let thread_key = *thread_keys.entry(r.0.clone()).or_insert(thread_keys_len);
+
+                let x0 = (thread_key as f64) + 0.2;
+                let x1 = (thread_key as f64) + 0.8;
+                let y0: f64 = r.1.duration_since(t_start).as_secs_f64();
+                let y1: f64 = r.2.duration_since(t_start).as_secs_f64();
+                (
+                    Rect::new(x0 * 3200.0, y0 * 500000.0, x1 * 3200.0, y1 * 500000.0),
+                    r.key().clone(),
+                )
+            })
+            .collect();
+
+        let bounding_rect = Rect::union(events.iter().map(|(rect, _)| rect));
+
+        let mut svg_content = String::new();
+
+        for (rect, label) in events {
+            let element = rect.to_svg(&label);
+            svg_content.push_str(&element);
+        }
+
+        let width = bounding_rect.x1 - bounding_rect.x0;
+        let height = bounding_rect.y1 - bounding_rect.y0;
+
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{} {} {} {}" width="100%" height="100%" preserveAspectRatio="none">{}</svg>"#,
+            bounding_rect.x0, bounding_rect.y0, width, height, svg_content
+        );
+
+        let file_path = format!(
+            "/tmp/svgs/{}.{}.svg",
+            block_env.number,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        );
+
+        let path = std::path::Path::new(&file_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+
+        // Create or open the file and write the SVG content
+        let mut file = std::fs::File::create(&file_path).unwrap();
+        std::io::Write::write_all(&mut file, svg.as_bytes()).unwrap();
+
+        // let mut logs: Vec<(_, _, _)> = scheduler
+        //     .logs
+        //     .iter()
+        //     .map(|rf| {
+        //         (
+        //             rf.value().0.duration_since(t0), //
+        //             rf.value().1.clone(),            //
+        //             rf.key().clone(),
+        //         )
+        //     })
+        //     .collect();
+        // logs.sort_by_key(|(t, _, _)| t.as_nanos());
+        // for l in logs {
+        //     println!("{:?}", l);
+        // }
 
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
