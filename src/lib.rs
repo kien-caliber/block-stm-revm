@@ -142,7 +142,7 @@ struct TxStatus {
 // before it in the block, along with the associated version. If no previous
 // transactions have written to a location, the value would be read from the
 // storage state before block execution.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TxVersion {
     tx_idx: TxIdx,
     tx_incarnation: TxIncarnation,

@@ -3,11 +3,13 @@ use std::{
     num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
     thread,
+    time::{Duration, Instant},
 };
 
 use ahash::AHashMap;
 use alloy_primitives::U256;
 use alloy_rpc_types::{Block, BlockTransactions};
+use dashmap::DashMap;
 use revm::{
     db::CacheDB,
     primitives::{BlockEnv, SpecId, TxEnv},
@@ -147,6 +149,8 @@ impl Pevm {
         let block_size = txs.len();
         let scheduler = Scheduler::new(block_size);
 
+        let stats: DashMap<TxVersion, Duration> = DashMap::new();
+
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
             &self.hasher,
@@ -166,6 +170,8 @@ impl Pevm {
             }
         }
 
+        let all_threads_started_at = Instant::now();
+
         // TODO: Better thread handling
         thread::scope(|scope| {
             for _ in 0..concurrency_level.into() {
@@ -174,7 +180,11 @@ impl Pevm {
                     while task.is_some() {
                         task = match task.unwrap() {
                             Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
+                                let started_at = Instant::now();
+                                let new_task =
+                                    self.try_execute(&vm, &scheduler, tx_version.clone());
+                                stats.insert(tx_version, started_at.elapsed());
+                                new_task
                             }
                             Task::Validation(tx_version) => {
                                 try_validate(&mv_memory, &scheduler, &tx_version)
@@ -198,6 +208,25 @@ impl Pevm {
                 });
             }
         });
+
+        let all_threads_duration = all_threads_started_at.elapsed();
+
+        let mut sorted_stats: Vec<_> = stats
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .filter(|(_, duration)| duration.mul_f64(1.5) >= all_threads_duration)
+            .collect();
+        sorted_stats.sort_by_key(|(_, duration)| duration.clone());
+        sorted_stats.reverse();
+        sorted_stats.truncate(8);
+        for (tx_version, duration) in sorted_stats {
+            println!(
+                "blk={:?} tx_version={:?} execution_time_ratio={:?}",
+                block_env.number,
+                tx_version,
+                duration.as_secs_f64() / all_threads_duration.as_secs_f64(),
+            )
+        }
 
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
