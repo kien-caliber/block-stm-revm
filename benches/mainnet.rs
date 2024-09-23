@@ -4,7 +4,7 @@
 
 #![allow(missing_docs)]
 
-use std::{num::NonZeroUsize, thread};
+use std::{num::NonZeroUsize, thread, time::Duration};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pevm::{chain::PevmEthereum, Pevm};
@@ -47,7 +47,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             block.transactions.len(),
             block.header.gas_used
         ));
-        group.bench_function("Sequential", |b| {
+
+        group.sampling_mode(criterion::SamplingMode::Flat);
+        group.sample_size(10);
+        group.warm_up_time(Duration::from_millis(500));
+
+        group.bench_function("S", |b| {
             b.iter(|| {
                 pevm.execute(
                     black_box(&storage),
@@ -55,20 +60,31 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     black_box(block.clone()),
                     black_box(concurrency_level),
                     black_box(true),
+                    black_box(None),
+                    black_box(None),
                 )
             })
         });
-        group.bench_function("Parallel", |b| {
-            b.iter(|| {
-                pevm.execute(
-                    black_box(&storage),
-                    black_box(&chain),
-                    black_box(block.clone()),
-                    black_box(concurrency_level),
-                    black_box(false),
-                )
-            })
-        });
+        for priority_limit in [12, 16, 20] {
+            for priority_concurrency_limit in [4, 8, 12] {
+                group.bench_function(
+                    format!("P_{}_{}", priority_limit, priority_concurrency_limit),
+                    |b| {
+                        b.iter(|| {
+                            pevm.execute(
+                                black_box(&storage),
+                                black_box(&chain),
+                                black_box(block.clone()),
+                                black_box(concurrency_level),
+                                black_box(false),
+                                black_box(Some(priority_limit)),
+                                black_box(Some(priority_concurrency_limit)),
+                            )
+                        })
+                    },
+                );
+            }
+        }
         group.finish();
     });
 }

@@ -1,4 +1,5 @@
 use std::{
+    collections::BinaryHeap,
     fmt::Debug,
     num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
@@ -23,7 +24,7 @@ use crate::{
     vm::{
         build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
     },
-    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxVersion,
+    EvmAccount, MemoryEntry, MemoryLocation, MemoryValue, Storage, Task, TxIdx, TxVersion,
 };
 
 /// Errors when executing a block with pevm.
@@ -99,6 +100,8 @@ impl Pevm {
         block: Block<C::Transaction>,
         concurrency_level: NonZeroUsize,
         force_sequential: bool,
+        priority_limit: Option<usize>,
+        priority_concurrency_level: Option<usize>,
     ) -> PevmResult<C> {
         let spec_id = chain
             .get_block_spec(&block.header)
@@ -126,6 +129,8 @@ impl Pevm {
                 block_env,
                 tx_envs,
                 concurrency_level,
+                priority_limit,
+                priority_concurrency_level,
             )
         }
     }
@@ -141,13 +146,41 @@ impl Pevm {
         block_env: BlockEnv,
         txs: Vec<TxEnv>,
         concurrency_level: NonZeroUsize,
+        priority_limit: Option<usize>,
+        priority_concurrency_level: Option<usize>,
     ) -> PevmResult<C> {
         if txs.is_empty() {
             return Ok(Vec::new());
         }
 
         let block_size = txs.len();
-        let scheduler = Scheduler::new(block_size);
+        let priority_txs: Vec<TxIdx> = {
+            let priority_limit = priority_limit.unwrap_or(concurrency_level.get());
+            let mut heap = BinaryHeap::with_capacity(priority_limit);
+            if priority_limit > 0 {
+                for (tx_idx, tx_env) in txs.iter().enumerate() {
+                    heap.push((!tx_env.gas_limit, tx_idx));
+                    if heap.len() > priority_limit {
+                        heap.pop();
+                    }
+                }
+            }
+            heap.into_iter().map(|(_, tx_idx)| tx_idx).collect()
+        };
+
+        let priority_concurrency_level = priority_concurrency_level.unwrap_or_else(|| {
+            let num_threads = std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN);
+            if num_threads <= concurrency_level {
+                0
+            } else {
+                std::cmp::min(
+                    num_threads.get() - concurrency_level.get(),
+                    priority_txs.len(),
+                )
+            }
+        });
+
+        let scheduler = Scheduler::new(block_size, priority_txs);
 
         let mv_memory = chain.build_mv_memory(&self.hasher, &block_env, &txs);
         let vm = Vm::new(
@@ -195,6 +228,28 @@ impl Pevm {
 
                         if task.is_none() {
                             task = scheduler.next_task();
+                        }
+                    }
+                });
+            }
+
+            for _ in 0..priority_concurrency_level {
+                scope.spawn(|| {
+                    let mut task = scheduler.next_priority_task();
+                    while task.is_some() {
+                        task = match task.unwrap() {
+                            Task::Execution(tx_version) => {
+                                self.try_execute(&vm, &scheduler, tx_version)
+                            }
+                            Task::Validation(tx_version) => {
+                                try_validate(&mv_memory, &scheduler, &tx_version)
+                            }
+                        };
+                        if self.abort_reason.get().is_some() {
+                            break;
+                        }
+                        if task.is_none() {
+                            task = scheduler.next_priority_task();
                         }
                     }
                 });
@@ -353,7 +408,7 @@ impl Pevm {
                         .get_or_init(|| AbortReason::FallbackToSequential);
                     None
                 }
-                Err(VmExecutionError::Blocking(blocking_tx_idx )) => {
+                Err(VmExecutionError::Blocking(blocking_tx_idx)) => {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {
