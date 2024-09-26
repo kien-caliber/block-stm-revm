@@ -1,7 +1,10 @@
 use std::{
     collections::{BTreeMap, BinaryHeap},
     fmt::Debug,
-    sync::{mpsc, LazyLock, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, LazyLock, Mutex, OnceLock,
+    },
     thread,
 };
 
@@ -296,6 +299,51 @@ impl Pevm {
             }
         }
 
+        let num_remaining_priority_workers = AtomicUsize::new(sorted_colors.len());
+
+        let run_regular_worker = || {
+            loop {
+                let mut task = scheduler.next_task();
+
+                if task.is_none() {
+                    // Usually, the priority workers should finish before regular workers.
+                    // However, if the priority workers are too slow, they might
+                    // finish late while the regular workers already left work.
+                    // This is dangerous because the priority workers don't care
+                    // about the leftover validation tasks. Therefore, the regular
+                    // workers must make sure that all the priority workers finished.
+                    // When do regular workers leave? Check out src/scheduler.rs:130.
+                    if num_remaining_priority_workers.load(Ordering::Acquire) == 0 {
+                        break;
+                    } else {
+                        // TODO: Find a better solution than busy-waiting.
+                        thread::yield_now();
+                    }
+                }
+
+                while let Some(t) = task {
+                    task = match t {
+                        Task::Execution(tx_version) => {
+                            self.try_execute(&vm, &scheduler, tx_version)
+                        }
+                        Task::Validation(tx_version) => {
+                            try_validate(&mv_memory, &scheduler, &tx_version)
+                        }
+                    };
+
+                    // TODO: Have different functions or an enum for the caller to choose
+                    // the handling behaviour when a transaction's EVM execution fails.
+                    // Parallel block builders would like to exclude such transaction,
+                    // verifiers may want to exit early to save CPU cycles, while testers
+                    // may want to collect all execution results. We are exiting early as
+                    // the default behaviour for now.
+                    if self.abort_reason.get().is_some() {
+                        break;
+                    }
+                }
+            }
+        };
+
         let run_priority_worker = |color: TxIdx| {
             for (&tx_idx, &c) in priority_txs_with_color.iter() {
                 if c != color {
@@ -318,44 +366,17 @@ impl Pevm {
                     }
                 }
             }
+            num_remaining_priority_workers.fetch_sub(1, Ordering::Release);
         };
 
         // TODO: Better thread handling
         thread::scope(|scope| {
             for color in sorted_colors {
-                scope.spawn(move || {
-                    run_priority_worker(color);
-                });
+                scope.spawn(move || run_priority_worker(color));
             }
 
             for _ in 0..parallel_params.num_threads_for_regular_txs {
-                scope.spawn(|| {
-                    let mut task = scheduler.next_task();
-                    while task.is_some() {
-                        task = match task.unwrap() {
-                            Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
-                            }
-                            Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
-                            }
-                        };
-
-                        // TODO: Have different functions or an enum for the caller to choose
-                        // the handling behaviour when a transaction's EVM execution fails.
-                        // Parallel block builders would like to exclude such transaction,
-                        // verifiers may want to exit early to save CPU cycles, while testers
-                        // may want to collect all execution results. We are exiting early as
-                        // the default behaviour for now.
-                        if self.abort_reason.get().is_some() {
-                            break;
-                        }
-
-                        if task.is_none() {
-                            task = scheduler.next_task();
-                        }
-                    }
-                });
+                scope.spawn(run_regular_worker);
             }
         });
 
