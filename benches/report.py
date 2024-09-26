@@ -16,7 +16,7 @@ CRITERION_PATH = "target/criterion"
 
 
 def format_ms(ns):
-    return round(ns / 1000000, 3)
+    return str(round(ns / 1000000, 3))
 
 
 def read_estimate(block, exec_type):
@@ -25,29 +25,15 @@ def read_estimate(block, exec_type):
         return (estimates["slope"] or estimates["mean"])["point_estimate"]
 
 
-total_sequential = 0
-total_parallel = 0
-max_speed_up = 0
-min_speed_up = float("inf")
-
-for path in os.listdir(CRITERION_PATH):
-    if path.startswith("Block"):
-        estimate_sequential = read_estimate(path, "Sequential")
-        total_sequential += estimate_sequential
-
-        estimate_parallel = read_estimate(path, "Parallel")
-        total_parallel += estimate_parallel
-
-        speed_up = round(estimate_sequential / estimate_parallel, 2)
-        max_speed_up = max(max_speed_up, speed_up)
-        min_speed_up = min(min_speed_up, speed_up)
-
-        print(f"{path}")
-        print(
-            f"{format_ms(estimate_sequential)} {format_ms(estimate_parallel)} {speed_up}\n"
-        )
+def to_blkno(name):
+    if name.startswith("BLK"):
+        return int(name.split()[1])
+    else:
+        return 0
 
 
-print(f"Average: x{round(total_sequential / total_parallel, 2)}")
-print(f"Max: x{max_speed_up}")
-print(f"Min: x{min_speed_up}")
+for name in sorted(os.listdir(CRITERION_PATH), key=to_blkno):
+    if name.startswith("BLK"):
+        cases = ["S", "P0", "P8", "P16", "P32"]
+        means = [read_estimate(name, c) for c in cases]
+        print(name, " ".join(map(format_ms, means)))

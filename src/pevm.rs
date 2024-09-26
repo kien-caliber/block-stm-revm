@@ -91,9 +91,9 @@ static AVAILABLE_PARALLELISM: LazyLock<usize> =
 /// Coefficients for [Pevm::execute_revm_parallel]
 #[derive(Debug)]
 pub struct ParallelParams {
-    num_threads_for_regular_txs: usize,
-    num_threads_for_priority_txs: usize,
-    max_num_priority_txs: usize,
+    pub num_threads_for_regular_txs: usize,
+    pub num_threads_for_priority_txs: usize,
+    pub max_num_priority_txs: usize,
 }
 
 impl Default for ParallelParams {
