@@ -5,7 +5,7 @@
 #![allow(missing_docs)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pevm::{chain::PevmEthereum, Pevm, PevmStrategy};
+use pevm::{chain::PevmEthereum, ParallelParams, Pevm, PevmStrategy};
 
 // Better project structure
 #[path = "../tests/common/mod.rs"]
@@ -25,12 +25,17 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     common::for_each_block_from_disk(|block, storage| {
         let mut group = c.benchmark_group(format!(
-            "Block {}({} txs, {} gas)",
+            "BLK {} {} {}",
             block.header.number,
             block.transactions.len(),
             block.header.gas_used
         ));
-        group.bench_function("Sequential", |b| {
+
+        group.sampling_mode(criterion::SamplingMode::Flat);
+        group.sample_size(10);
+        group.warm_up_time(std::time::Duration::from_millis(250));
+
+        group.bench_function("S", |b| {
             b.iter(|| {
                 assert!(pevm
                     .execute(
@@ -42,21 +47,29 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     .is_ok());
             })
         });
-        group.bench_function("Parallel", |b| {
-            b.iter(|| {
-                assert!(pevm
-                    .execute(
-                        black_box(&storage),
-                        black_box(&chain),
-                        black_box(block.clone()),
-                        black_box(PevmStrategy::auto(
-                            block.transactions.len(),
-                            block.header.gas_used,
-                        )),
-                    )
-                    .is_ok());
-            })
-        });
+        for r in [6, 8, 10] {
+            for p in [6, 8, 10] {
+                for n in [16, 24, 32] {
+                    group.bench_function(format!("P_{:02}_{:02}_{:02}", r, p, n), |b| {
+                        b.iter(|| {
+                            assert!(pevm
+                                .execute(
+                                    black_box(&storage),
+                                    black_box(&chain),
+                                    black_box(block.clone()),
+                                    black_box(PevmStrategy::Parallel(ParallelParams {
+                                        num_threads_for_regular_txs: r,
+                                        num_threads_for_priority_txs: p,
+                                        max_num_priority_txs: n
+                                    })),
+                                )
+                                .is_ok());
+                        })
+                    });
+                }
+            }
+        }
+
         group.finish();
     });
 }
