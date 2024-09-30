@@ -10,6 +10,7 @@ use crate::{
     mv_memory::MvMemory,
     scheduler::Scheduler,
     storage::StorageWrapper,
+    svg::Inspector,
     vm::{
         build_evm, ExecutionError, PevmTxExecutionResult, Vm, VmExecutionError, VmExecutionResult,
     },
@@ -88,10 +89,16 @@ pub struct Pevm {
     execution_results: Vec<Mutex<Option<PevmTxExecutionResult>>>,
     pre_vm_results: Vec<Mutex<Option<Result<VmExecutionResult, VmExecutionError>>>>,
     abort_reason: OnceLock<AbortReason>,
+    inspector: Inspector,
     dropper: AsyncDropper<(MvMemory, Scheduler, Vec<TxEnv>)>,
 }
 
 impl Pevm {
+    /// Get SVG file content
+    pub fn to_svg(&self, from: std::time::Instant, to: std::time::Instant) -> String {
+        self.inspector.to_svg(from, to)
+    }
+
     /// Execute an Alloy block, which is becoming the "standard" format in Rust.
     /// TODO: Better error handling.
     pub fn execute<S: Storage + Send + Sync, C: PevmChain + Send + Sync>(
@@ -101,6 +108,8 @@ impl Pevm {
         block: Block<C::Transaction>,
         strategy: PevmStrategy,
     ) -> PevmResult<C> {
+        self.inspector.clear();
+
         let spec_id = chain
             .get_block_spec(&block.header)
             .map_err(PevmError::BlockSpecError)?;
@@ -193,12 +202,16 @@ impl Pevm {
                 scope.spawn(|| {
                     let mut task = scheduler.next_task();
                     while task.is_some() {
-                        task = match task.unwrap() {
+                        task = match task.clone().unwrap() {
                             Task::Execution(tx_version) => {
-                                self.try_execute(&vm, &scheduler, tx_version)
+                                self.inspector.measure(task.unwrap(), || {
+                                    self.try_execute(&vm, &scheduler, tx_version)
+                                })
                             }
                             Task::Validation(tx_version) => {
-                                try_validate(&mv_memory, &scheduler, &tx_version)
+                                self.inspector.measure(task.unwrap(), || {
+                                    try_validate(&mv_memory, &scheduler, &tx_version)
+                                })
                             }
                         };
 

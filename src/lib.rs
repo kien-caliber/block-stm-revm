@@ -182,7 +182,7 @@ type WriteSet = Vec<(MemoryLocationHash, MemoryValue)>;
 // TODO: Add more useful work when there are idle workers like near
 // the end of block execution, while waiting for a huge blocking
 // transaction to resolve, etc.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Task {
     Execution(TxVersion),
     Validation(TxVersion),
@@ -229,3 +229,4 @@ pub use storage::{
 };
 mod vm;
 pub use vm::{ExecutionError, PevmTxExecutionResult};
+pub mod svg;
