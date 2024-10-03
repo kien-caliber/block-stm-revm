@@ -33,6 +33,11 @@ impl PevmOptimism {
             id: NamedChain::Optimism.into(),
         }
     }
+
+    /// Custom network
+    pub fn custom(id: u64) -> Self {
+        PevmOptimism { id }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
