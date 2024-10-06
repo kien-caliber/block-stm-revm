@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     fmt::{Debug, Display},
     num::NonZeroUsize,
     sync::{mpsc, Mutex, OnceLock},
@@ -10,7 +11,8 @@ use alloy_rpc_types::{Block, BlockTransactions};
 use revm::{
     db::CacheDB,
     primitives::{
-        AccountInfo, AccountStatus, BlockEnv, ResultAndState,
+        AccountInfo, AccountStatus, BlockEnv, Bytecode, EVMError, InvalidTransaction,
+        ResultAndState,
         SpecId::{self},
         TxEnv,
     },
@@ -263,9 +265,35 @@ impl Pevm {
                         _ => unreachable!(),
                     }
                     // Assert that evaluated nonce is correct when address is caller.
-                    debug_assert!(
-                        tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == info.nonce)
-                    );
+                    if tx.caller == address {
+                        if let Some(nonce) = tx.nonce {
+                            if nonce + 1 < info.nonce {
+                                return Err(PevmError::ExecutionError(
+                                    EVMError::<Infallible>::Transaction(
+                                        InvalidTransaction::NonceTooLow {
+                                            tx: nonce,
+                                            state: info.nonce - 1,
+                                        },
+                                    )
+                                    .to_string(),
+                                ));
+                            }
+                            if nonce + 1 > info.nonce {
+                                return Err(PevmError::ExecutionError(
+                                    EVMError::<Infallible>::Transaction(
+                                        InvalidTransaction::NonceTooHigh {
+                                            tx: nonce,
+                                            state: info.nonce - 1,
+                                        },
+                                    )
+                                    .to_string(),
+                                ));
+                            }
+                        }
+                    }
+                    // debug_assert!(
+                    //     tx.caller != address || tx.nonce.map_or(true, |n| n + 1 == info.nonce)
+                    // );
 
                     // SAFETY: The multi-version data structure should not leak an index over block size.
                     let tx_result = unsafe { fully_evaluated_results.get_unchecked_mut(*tx_idx) };
