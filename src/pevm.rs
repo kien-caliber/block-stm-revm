@@ -333,6 +333,7 @@ impl Pevm {
         scheduler: &Scheduler,
         tx_version: TxVersion,
     ) -> Option<Task> {
+        let mut last_blocking_tx_idx = None;
         loop {
             return match vm.execute(&tx_version, true) {
                 Err(VmExecutionError::Retry) => {
@@ -351,9 +352,17 @@ impl Pevm {
                     if !scheduler.add_dependency(tx_version.tx_idx, blocking_tx_idx)
                         && self.abort_reason.get().is_none()
                     {
-                        // Retry the execution immediately if the blocking transaction was
-                        // re-executed by the time we can add it as a dependency.
-                        continue;
+                        // make sure that this place is never reached twice with the same `blocking_tx_idx`
+                        if last_blocking_tx_idx == Some(blocking_tx_idx) {
+                            scheduler.abort();
+                            self.abort_reason
+                                .get_or_init(|| AbortReason::FallbackToSequential);
+                        } else {
+                            last_blocking_tx_idx = Some(blocking_tx_idx);
+                            // Retry the execution immediately if the blocking transaction was
+                            // re-executed by the time we can add it as a dependency.
+                            continue;
+                        }
                     }
                     None
                 }
