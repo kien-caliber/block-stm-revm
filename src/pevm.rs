@@ -36,6 +36,8 @@ pub enum PevmError<C: PevmChain> {
     /// EVM execution error.
     // TODO: More concrete types than just an arbitrary string.
     ExecutionError(String),
+    /// Fallback to sequential
+    FallbackToSequential,
     /// Impractical errors that should be unreachable.
     /// The library has bugs if this is yielded.
     UnreachableError,
@@ -202,8 +204,8 @@ impl Pevm {
         if let Some(abort_reason) = self.abort_reason.take() {
             match abort_reason {
                 AbortReason::FallbackToSequential => {
-                    self.dropper.drop((mv_memory, scheduler, Vec::new()));
-                    return execute_revm_sequential(storage, chain, spec_id, block_env, txs);
+                    self.dropper.drop((mv_memory, scheduler, txs));
+                    return Err(PevmError::FallbackToSequential);
                 }
                 AbortReason::ExecutionError(err) => {
                     self.dropper.drop((mv_memory, scheduler, txs));
