@@ -1,8 +1,8 @@
-use std::fmt::Display;
+use std::{cmp::Ordering, fmt::Display};
 
 use alloy_primitives::TxKind;
 use alloy_rpc_types::Receipt;
-use hashbrown::HashMap;
+use hashbrown::{hash_map::Entry, HashMap};
 use revm::{
     primitives::{
         AccountInfo, Address, BlockEnv, Bytecode, CfgEnv, EVMError, Env, InvalidTransaction,
@@ -389,19 +389,40 @@ impl<'a, S: DatabaseRef<Error: Display>, C: PevmChain> Database for VmDb<'a, S, 
             *read_origins = new_origins;
         }
 
+        if location_hash == self.from_hash {
+            let mut current_parent: Option<TxIdx> =
+                self.vm.parent_tx_idxs.get(&self.tx_idx).copied();
+            for read_origin in read_origins.iter() {
+                match read_origin {
+                    ReadOrigin::MvMemory(tx_version) => {
+                        if let Some(parent) = current_parent {
+                            match parent.cmp(&tx_version.tx_idx) {
+                                Ordering::Less => {}
+                                Ordering::Equal => {
+                                    current_parent = self.vm.parent_tx_idxs.get(&parent).copied();
+                                }
+                                Ordering::Greater => {
+                                    return Err(ReadError::Blocking(parent));
+                                }
+                            }
+                        }
+                    }
+                    ReadOrigin::Storage => {
+                        if let Some(parent) = current_parent {
+                            return Err(ReadError::Blocking(parent));
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(mut account) = final_account {
             // Check sender nonce
             account.nonce += nonce_addition;
             if location_hash == self.from_hash
                 && self.tx.nonce.is_some_and(|nonce| nonce != account.nonce)
             {
-                if self.tx_idx > 0 {
-                    // TODO: Better retry strategy -- immediately, to the
-                    // closest sender tx, to the missing sender tx, etc.
-                    return Err(ReadError::Blocking(self.tx_idx - 1));
-                } else {
-                    return Err(ReadError::InvalidNonce(self.tx_idx));
-                }
+                return Err(ReadError::InvalidNonce(self.tx_idx));
             }
 
             // Fully evaluate the account and register it to read cache
@@ -504,6 +525,7 @@ pub(crate) struct Vm<'a, S: DatabaseRef<Error: Display>, C: PevmChain> {
     spec_id: SpecId,
     beneficiary_location_hash: MemoryLocationHash,
     reward_policy: RewardPolicy,
+    parent_tx_idxs: HashMap<TxIdx, TxIdx>,
 }
 
 impl<'a, S: DatabaseRef<Error: Display>, C: PevmChain> Vm<'a, S, C> {
@@ -515,6 +537,21 @@ impl<'a, S: DatabaseRef<Error: Display>, C: PevmChain> Vm<'a, S, C> {
         txs: &'a [TxEnv],
         spec_id: SpecId,
     ) -> Self {
+        let mut parent_tx_idxs = HashMap::new();
+        let mut address_to_tx_idx = HashMap::new();
+
+        for (tx_idx, tx) in txs.iter().enumerate() {
+            match address_to_tx_idx.entry(tx.caller) {
+                Entry::Occupied(mut occupied_entry) => {
+                    let old_value = occupied_entry.insert(tx_idx);
+                    parent_tx_idxs.insert(tx_idx, old_value);
+                }
+                Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(tx_idx);
+                }
+            }
+        }
+
         Self {
             storage,
             mv_memory,
@@ -526,6 +563,7 @@ impl<'a, S: DatabaseRef<Error: Display>, C: PevmChain> Vm<'a, S, C> {
                 block_env.coinbase,
             )),
             reward_policy: chain.get_reward_policy(),
+            parent_tx_idxs,
         }
     }
 
